@@ -163,7 +163,8 @@ class _DownloadDialogState extends State<_DownloadDialog> {
           _progress = 1;
           _status =
               'Téléchargement terminé. Confirmez l\'installation dans la '
-              'fenêtre d\'Android.';
+              'fenêtre d\'Android.\n\nSi Android vous a d\'abord demandé une '
+              'autorisation, touchez « Installer » une fois celle-ci donnée.';
         });
       case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
         _fail(
@@ -212,6 +213,18 @@ class _DownloadDialogState extends State<_DownloadDialog> {
       actions: [
         if (_error != null)
           TextButton(onPressed: _start, child: const Text('Réessayer')),
+        // La toute première fois, Android demande d'autoriser JellyMusic à
+        // installer des applications ; une fois l'autorisation donnée,
+        // l'installateur ne revient pas seul. Ce bouton le relance.
+        if (_installing && _error == null)
+          FilledButton(
+            onPressed: () {
+              _sub?.cancel();
+              _installing = false;
+              _start();
+            },
+            child: const Text('Installer'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: Text(_error != null || _installing ? 'Fermer' : 'Annuler'),

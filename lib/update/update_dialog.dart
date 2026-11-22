@@ -37,6 +37,21 @@ Future<void> checkForUpdates(
   await showUpdateDialog(context, release);
 }
 
+/// Les notes de version sont écrites en Markdown pour GitHub ; on retire
+/// les symboles de mise en forme pour les afficher proprement.
+String plainNotes(String md) => md
+    .split('\n')
+    .map(
+      (l) => l
+          .replaceFirst(RegExp(r'^\s*#+\s*'), '')
+          .replaceFirst(RegExp(r'^\s*[-*]\s+'), '• ')
+          .replaceAll('**', '')
+          .replaceAll('__', '')
+          .replaceAll('`', ''),
+    )
+    .join('\n')
+    .trim();
+
 Future<void> showUpdateDialog(BuildContext context, AppRelease r) async {
   final installed = await Updater.currentVersion();
   if (!context.mounted) return;
@@ -57,7 +72,7 @@ Future<void> showUpdateDialog(BuildContext context, AppRelease r) async {
             ),
             if (r.notes.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Text(r.notes),
+              Text(plainNotes(r.notes)),
             ],
           ],
         ),

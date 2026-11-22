@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellymusic/api/jellyfin_client.dart';
 import 'package:jellymusic/models.dart';
+import 'package:jellymusic/update/update_dialog.dart';
 import 'package:jellymusic/update/updater.dart';
 
 void main() {
@@ -10,6 +11,13 @@ void main() {
     expect(compareVersions('2.0.0', '1.99.99') > 0, isTrue);
     expect(compareVersions('1.0.0', '1.0.0+5'), 0);
     expect(compareVersions('1.0', '1.0.0'), 0);
+  });
+
+  test('nettoie les notes de version Markdown', () {
+    expect(
+      plainNotes('**Fonctions**\n- Lecture `rapide`\n## Titre'),
+      'Fonctions\n• Lecture rapide\nTitre',
+    );
   });
 
   test('normalise l\'adresse du serveur', () {

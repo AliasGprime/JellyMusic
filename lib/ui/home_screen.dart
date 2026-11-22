@@ -8,6 +8,7 @@ import 'artist_screen.dart';
 import 'mini_player.dart';
 import 'playlists_tab.dart';
 import 'search_screen.dart';
+import '../update/update_dialog.dart';
 import 'widgets.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -88,10 +89,15 @@ class _HomeScreenState extends State<HomeScreen> {
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'shuffle') _shuffleAll();
+              if (v == 'update') checkForUpdates(context, manual: true);
               if (v == 'logout') _logout();
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'shuffle', child: Text('Tout en aléatoire')),
+              PopupMenuItem(
+                value: 'update',
+                child: Text('Rechercher une mise à jour'),
+              ),
               PopupMenuItem(value: 'logout', child: Text('Se déconnecter')),
             ],
           ),

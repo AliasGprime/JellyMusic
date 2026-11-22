@@ -1,8 +1,17 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellymusic/api/jellyfin_client.dart';
 import 'package:jellymusic/models.dart';
+import 'package:jellymusic/update/updater.dart';
 
 void main() {
+  test('compare les numéros de version', () {
+    expect(compareVersions('1.0.1', '1.0.0') > 0, isTrue);
+    expect(compareVersions('v1.2.0', '1.10.0') < 0, isTrue);
+    expect(compareVersions('2.0.0', '1.99.99') > 0, isTrue);
+    expect(compareVersions('1.0.0', '1.0.0+5'), 0);
+    expect(compareVersions('1.0', '1.0.0'), 0);
+  });
+
   test('normalise l\'adresse du serveur', () {
     expect(
       JellyfinClient.normalizeUrl('mon-serveur:8096/'),

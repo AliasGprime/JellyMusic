@@ -160,15 +160,43 @@ class PlayerController extends ChangeNotifier {
       duration: t.duration,
       artUri: art,
     );
-    if (local != null) return AudioSource.file(local, tag: tag);
-    return AudioSource.uri(
+    if (local != null) {
+      return ProgressiveAudioSource(
+        Uri.file(local),
+        tag: tag,
+        duration: t.duration,
+        options: _seekableLocal,
+      );
+    }
+    return ProgressiveAudioSource(
       Uri.parse(
         c.streamUrl(t.id, maxKbps: forced ? _streamOverride[t.id] : _queueKbps),
       ),
       headers: kIsWeb ? null : c.streamHeaders,
       tag: tag,
+      duration: t.duration,
+      options: _seekableMp3,
     );
   }
+
+  /// Android : un MP3 converti à la volée par Jellyfin n'a ni durée ni table
+  /// de positions ; sans ces options, le lecteur le considère « non
+  /// déplaçable » et un déplacement dans le morceau le fait repartir au
+  /// début. Débit constant (MP3 converti) : position calculée à partir du
+  /// débit, même si la taille du flux est inconnue ; fichier téléchargé :
+  /// index construit en lisant le fichier.
+  static const _seekableMp3 = ProgressiveAudioSourceOptions(
+    androidExtractorOptions: AndroidExtractorOptions(
+      constantBitrateSeekingEnabled: true,
+      constantBitrateSeekingAlwaysEnabled: true,
+    ),
+  );
+  static const _seekableLocal = ProgressiveAudioSourceOptions(
+    androidExtractorOptions: AndroidExtractorOptions(
+      constantBitrateSeekingEnabled: true,
+      mp3Flags: AndroidExtractorOptions.flagMp3EnableIndexSeeking,
+    ),
+  );
 
   /// Remplace la file et lance la lecture.
   Future<void> playItems(

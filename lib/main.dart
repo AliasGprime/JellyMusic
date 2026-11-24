@@ -93,8 +93,12 @@ class _StartupUpdateCheckState extends State<_StartupUpdateCheck> {
   void initState() {
     super.initState();
     // En données mobiles, confirmation avant d'écouter en qualité originale.
-    context.read<PlayerController>().confirmOriginalOnMobile = (n) =>
+    final pc = context.read<PlayerController>();
+    pc.confirmOriginalOnMobile = (n) =>
         mounted ? showMobileDataDialog(context, n) : Future.value(false);
+    // Wi-Fi perdu en pleine écoute en qualité originale.
+    pc.confirmWifiLost = () =>
+        mounted ? showWifiLostDialog(context) : Future.value(false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkForUpdates(context);
     });

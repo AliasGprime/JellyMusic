@@ -300,6 +300,41 @@ Future<bool?> showMobileDataDialog(BuildContext context, int trackCount) {
   );
 }
 
+/// Le Wi-Fi a été perdu pendant une écoute en qualité originale (la lecture
+/// est en pause) : continuer en originale (true), passer en MP3 320 kb/s
+/// (false) ou rester en pause (null).
+Future<bool?> showWifiLostDialog(BuildContext context) {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: const Icon(Icons.wifi_off),
+      title: const Text('Wi-Fi perdu'),
+      content: const Text(
+        'La lecture est en pause : vous êtes passé en données mobiles et le '
+        'morceau est en qualité originale (environ 12 Mo par morceau).\n\n'
+        'MP3 320 kb/s utilise 4 à 5 fois moins de données ; ce choix est aussi '
+        'gardé dans les Paramètres.',
+      ),
+      actionsOverflowDirection: VerticalDirection.down,
+      actionsOverflowButtonSpacing: 4,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Rester en pause'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Continuer en originale'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('MP3 320 kb/s'),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Choix de la version du morceau en cours : téléchargée, originale ou MP3.
 void showSourceSheet(BuildContext context) {
   showModalBottomSheet(

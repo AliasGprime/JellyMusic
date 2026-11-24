@@ -90,6 +90,12 @@ class PlayerController extends ChangeNotifier {
         notifyListeners();
       }),
     );
+    // Wi-Fi perdu en pleine écoute en qualité originale : pause et question.
+    if (!kIsWeb) {
+      _subs.add(
+        Connectivity().onConnectivityChanged.listen(_onConnectivityChanged),
+      );
+    }
     _progressTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       final id = _reportedId;
       if (id != null && player.playing) {
@@ -343,6 +349,75 @@ class PlayerController extends ChangeNotifier {
   /// données mobiles. Réponse : true = originale, false = MP3 320 kb/s,
   /// null = annuler. Fourni par l'interface (boîte de dialogue).
   Future<bool?> Function(int trackCount)? confirmOriginalOnMobile;
+
+  /// Wi-Fi perdu pendant une écoute en qualité originale : continuer en
+  /// originale (true), passer en MP3 320 kb/s (false) ou rester en pause
+  /// (null). Fourni par l'interface.
+  Future<bool?> Function()? confirmWifiLost;
+
+  bool _wasOnMobile = false;
+  bool _askingWifiLost = false;
+
+  /// Vrai si le morceau en cours passe par Internet en qualité originale.
+  bool get _currentStreamsOriginal {
+    final t = current;
+    if (t == null || currentIsLocal) return false;
+    return _streamOverride.containsKey(t.id)
+        ? _streamOverride[t.id] == null
+        : _queueKbps == null;
+  }
+
+  Future<void> _onConnectivityChanged(List<ConnectivityResult> r) async {
+    final mobile =
+        r.contains(ConnectivityResult.mobile) &&
+        !r.contains(ConnectivityResult.wifi) &&
+        !r.contains(ConnectivityResult.ethernet);
+    final switched = mobile && !_wasOnMobile;
+    _wasOnMobile = mobile;
+    if (!switched || _askingWifiLost) return;
+    if (!player.playing || !_currentStreamsOriginal) return;
+    final ask = confirmWifiLost;
+    if (ask == null) return;
+    _askingWifiLost = true;
+    try {
+      await player.pause();
+      final choice = await ask();
+      if (choice == true) {
+        player.play();
+      } else if (choice == false) {
+        await setStreamKbps(320);
+        await _requeueAt(320);
+        player.play();
+      }
+      // null : on reste en pause.
+    } finally {
+      _askingWifiLost = false;
+    }
+  }
+
+  /// Reconstruit la file au débit [kbps] (morceaux non téléchargés), en
+  /// gardant le morceau en cours et l'endroit écouté.
+  Future<void> _requeueAt(int kbps) async {
+    final seq = player.sequence;
+    final idx = player.currentIndex;
+    if (seq.isEmpty || idx == null) return;
+    final items = [for (final s in seq) _itemForSource(s)]
+        .whereType<JItem>()
+        .toList();
+    if (items.length != seq.length) return;
+    final pos = player.position;
+    _streamOverride.clear();
+    _queueKbps = kbps;
+    _endCrossfade();
+    await player.setAudioSources(
+      items.map(_sourceFor).toList(),
+      initialIndex: idx,
+      initialPosition: pos,
+      shuffleOrder: _order = QueueShuffleOrder(),
+    );
+    if (player.shuffleModeEnabled) await player.shuffle();
+    notifyListeners();
+  }
 
   /// Vrai si le téléphone utilise les données mobiles (ni Wi-Fi, ni
   /// câble).

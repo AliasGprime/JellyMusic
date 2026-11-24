@@ -263,6 +263,41 @@ class _SeekAndLoopControls extends StatelessWidget {
   }
 }
 
+/// En données mobiles, avant d'écouter en qualité originale : originale
+/// quand même (true), MP3 320 kb/s (false) ou annuler (null).
+Future<bool?> showMobileDataDialog(BuildContext context, int trackCount) {
+  return showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      icon: const Icon(Icons.signal_cellular_alt),
+      title: const Text('Données mobiles'),
+      content: Text(
+        'Vous n\'êtes pas en Wi-Fi. La qualité originale (sans conversion) '
+        'utilise environ 12 Mo de données par morceau, contre 2 à 3 Mo en '
+        'MP3 320 kb/s.'
+        '${trackCount > 1 ? '\n\n$trackCount morceaux à écouter par Internet '
+                  '(les morceaux téléchargés sont lus depuis le téléphone).' : ''}',
+      ),
+      actionsOverflowDirection: VerticalDirection.down,
+      actionsOverflowButtonSpacing: 4,
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Annuler'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: const Text('Originale quand même'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('MP3 320 kb/s'),
+        ),
+      ],
+    ),
+  );
+}
+
 /// Choix de la version du morceau en cours : téléchargée, originale ou MP3.
 void showSourceSheet(BuildContext context) {
   showModalBottomSheet(
@@ -323,7 +358,7 @@ void showSourceSheet(BuildContext context) {
               icon: k == null ? Icons.high_quality : Icons.music_note_outlined,
               selected: override
                   ? pc.currentOverrideKbps == k
-                  : dl == null && pc.streamKbps == k,
+                  : dl == null && pc.queueKbps == k,
               onTap: () => pc.setCurrentSource(kbps: k),
             ),
           Padding(

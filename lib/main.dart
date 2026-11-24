@@ -10,6 +10,7 @@ import 'state/playlist_store.dart';
 import 'state/session.dart';
 import 'ui/home_screen.dart';
 import 'ui/login_screen.dart';
+import 'ui/player_screen.dart';
 import 'update/update_dialog.dart';
 
 Future<void> main() async {
@@ -91,6 +92,9 @@ class _StartupUpdateCheckState extends State<_StartupUpdateCheck> {
   @override
   void initState() {
     super.initState();
+    // En données mobiles, confirmation avant d'écouter en qualité originale.
+    context.read<PlayerController>().confirmOriginalOnMobile = (n) =>
+        mounted ? showMobileDataDialog(context, n) : Future.value(false);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkForUpdates(context);
     });

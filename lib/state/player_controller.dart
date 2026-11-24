@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:audio_session/audio_session.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -156,7 +157,7 @@ class PlayerController extends ChangeNotifier {
     if (local != null) return AudioSource.file(local, tag: tag);
     return AudioSource.uri(
       Uri.parse(
-        c.streamUrl(t.id, maxKbps: forced ? _streamOverride[t.id] : streamKbps),
+        c.streamUrl(t.id, maxKbps: forced ? _streamOverride[t.id] : _queueKbps),
       ),
       headers: kIsWeb ? null : c.streamHeaders,
       tag: tag,
@@ -170,6 +171,10 @@ class PlayerController extends ChangeNotifier {
     bool shuffle = false,
   }) async {
     if (items.isEmpty || _client == null) return;
+    // Qualité originale en données mobiles : on demande d'abord.
+    final kbps = await _checkMobileData(streamKbps, items);
+    if (kbps == _cancelled) return;
+    _queueKbps = kbps;
     var list = items;
     var index = start;
     if (shuffle) {
@@ -268,7 +273,7 @@ class PlayerController extends ChangeNotifier {
     }
     final d = downloads?.entries[t.id];
     if (d != null) return 'Téléchargé (${qualityName(d.kbps)})';
-    return qualityName(streamKbps);
+    return qualityName(_queueKbps);
   }
 
   /// Vrai si le morceau en cours est lu depuis son téléchargement.
@@ -300,6 +305,10 @@ class PlayerController extends ChangeNotifier {
     if (useDownload) {
       _streamOverride.remove(t.id);
     } else {
+      if (await _checkMobileData(kbps, [t], ignoreDownloads: true) ==
+          _cancelled) {
+        return;
+      }
       _streamOverride[t.id] = kbps;
     }
     final pos = player.position;
@@ -317,6 +326,57 @@ class PlayerController extends ChangeNotifier {
     await player.seek(pos, index: idx);
     if (wasPlaying) player.play();
     notifyListeners();
+  }
+
+  // ---- Données mobiles ----
+
+  /// Débit utilisé pour la file en cours (choisi au lancement de la
+  /// lecture : celui des Paramètres, ou MP3 si on l'a préféré en données
+  /// mobiles).
+  int? _queueKbps = kIsWeb ? null : 320;
+  int? get queueKbps => _queueKbps;
+
+  /// Valeur spéciale : l'utilisateur a annulé.
+  static const _cancelled = -1;
+
+  /// Demande à l'utilisateur s'il veut écouter en qualité originale en
+  /// données mobiles. Réponse : true = originale, false = MP3 320 kb/s,
+  /// null = annuler. Fourni par l'interface (boîte de dialogue).
+  Future<bool?> Function(int trackCount)? confirmOriginalOnMobile;
+
+  /// Vrai si le téléphone utilise les données mobiles (ni Wi-Fi, ni
+  /// câble).
+  static Future<bool> onMobileData() async {
+    if (kIsWeb) return false;
+    try {
+      final r = await Connectivity().checkConnectivity();
+      return r.contains(ConnectivityResult.mobile) &&
+          !r.contains(ConnectivityResult.wifi) &&
+          !r.contains(ConnectivityResult.ethernet);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Débit à utiliser pour lire [tracks] en flux, après confirmation si
+  /// [kbps] est l'original (null) et qu'on est en données mobiles. Renvoie
+  /// [_cancelled] si l'utilisateur annule. Les morceaux téléchargés ne
+  /// comptent pas (ils ne passent pas par Internet).
+  Future<int?> _checkMobileData(
+    int? kbps,
+    List<JItem> tracks, {
+    bool ignoreDownloads = false,
+  }) async {
+    if (kbps != null || kIsWeb) return kbps;
+    final streamed = ignoreDownloads
+        ? tracks.length
+        : tracks.where((t) => !(downloads?.isDownloaded(t.id) ?? false)).length;
+    if (streamed == 0 || !await onMobileData()) return kbps;
+    final ask = confirmOriginalOnMobile;
+    if (ask == null) return kbps;
+    final choice = await ask(streamed);
+    if (choice == null) return _cancelled;
+    return choice ? null : 320;
   }
 
   // ---- Qualité de lecture ----

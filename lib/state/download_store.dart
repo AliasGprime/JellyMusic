@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../models.dart';
+import 'download_notification.dart';
 import 'session.dart';
 
 /// Un morceau téléchargé sur le téléphone.
@@ -57,6 +58,9 @@ class DownloadedPlaylist {
       );
 }
 
+/// Morceaux d'une liste présents sur le téléphone.
+enum OfflineState { none, partial, complete }
+
 class _Job {
   final JItem track;
   final int? kbps;
@@ -100,6 +104,8 @@ class DownloadStore extends ChangeNotifier {
 
   Future<void> init() async {
     if (!supported) return;
+    // Bouton « Arrêter » de la notification.
+    DownloadNotification.onCancel(cancel);
     try {
       final base = await getApplicationDocumentsDirectory();
       _dir = Directory('${base.path}/downloads');
@@ -140,6 +146,15 @@ class DownloadStore extends ChangeNotifier {
   }
 
   bool isDownloaded(String trackId) => entries.containsKey(trackId);
+
+  /// Combien des morceaux [ids] (ex. ceux d'une playlist) sont sur le
+  /// téléphone : aucun, une partie ou tous.
+  OfflineState offlineStateOf(List<String>? ids) {
+    if (ids == null || ids.isEmpty || entries.isEmpty) return OfflineState.none;
+    final n = ids.where(entries.containsKey).length;
+    if (n == 0) return OfflineState.none;
+    return n == ids.length ? OfflineState.complete : OfflineState.partial;
+  }
 
   /// En attente dans la file de téléchargement.
   bool isQueued(String trackId) => _queue.any((j) => j.track.id == trackId);
@@ -201,6 +216,10 @@ class DownloadStore extends ChangeNotifier {
       total++;
     }
     notifyListeners();
+    if (_queue.isNotEmpty && !_askedPermission) {
+      _askedPermission = true;
+      await DownloadNotification.askPermission();
+    }
     _run();
   }
 
@@ -213,6 +232,42 @@ class DownloadStore extends ChangeNotifier {
   }
 
   bool _skipCurrent = false;
+  bool _askedPermission = false;
+
+  // ---- Notification de progression ----
+
+  DateTime _lastNotified = DateTime(0);
+  int _lastPermille = -1;
+
+  /// Met à jour la notification (au plus deux fois par seconde, sauf si
+  /// [force]).
+  void _notify({bool force = false}) {
+    if (!_running || total <= 0) return;
+    final cur = currentProgress < 0 ? 0.0 : currentProgress;
+    final permille = (((done + failed + cur) / total) * 1000).round().clamp(
+      0,
+      1000,
+    );
+    final now = DateTime.now();
+    if (!force &&
+        (permille == _lastPermille ||
+            now.difference(_lastNotified) <
+                const Duration(milliseconds: 500))) {
+      return;
+    }
+    _lastNotified = now;
+    _lastPermille = permille;
+    final n = (done + failed + 1).clamp(1, total);
+    final name = current?.name;
+    DownloadNotification.update(
+      title: total == 1
+          ? 'Téléchargement de la musique'
+          : 'Téléchargement : $n sur $total',
+      text: name ?? '',
+      progress: permille,
+      max: 1000,
+    );
+  }
 
   /// Annule le téléchargement d'un seul morceau (en attente ou en cours).
   /// Renvoie faux s'il n'y avait plus rien à annuler (déjà terminé).
@@ -234,12 +289,14 @@ class DownloadStore extends ChangeNotifier {
     if (_running) return;
     _running = true;
     _cancelled = false;
+    await DownloadNotification.clearDone();
     while (_queue.isNotEmpty && !_cancelled) {
       final job = _queue.removeAt(0);
       current = job.track;
       currentProgress = 0;
       _skipCurrent = false;
       notifyListeners();
+      _notify(force: true);
       try {
         await _download(job);
         done++;
@@ -250,6 +307,19 @@ class DownloadStore extends ChangeNotifier {
     }
     current = null;
     _running = false;
+    await DownloadNotification.stop();
+    // Résumé silencieux (utile si l'application est en arrière-plan).
+    if (!_cancelled && (done > 0 || failed > 0)) {
+      await DownloadNotification.done(
+        failed == 0
+            ? 'Téléchargements terminés'
+            : 'Téléchargements terminés, avec des erreurs',
+        [
+          done == 1 ? '1 morceau téléchargé' : '$done morceaux téléchargés',
+          if (failed > 0) failed == 1 ? '1 échec' : '$failed échecs',
+        ].join(' · '),
+      );
+    }
     // Compteurs remis à zéro pour la prochaine série.
     total = done = failed = 0;
     revision++;
@@ -287,6 +357,7 @@ class DownloadStore extends ChangeNotifier {
             ? -1
             : (received / expected).clamp(0.0, 1.0);
         notifyListeners();
+        _notify();
       }
       await sink.close();
     } catch (_) {

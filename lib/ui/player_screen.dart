@@ -385,7 +385,7 @@ void showSourceSheet(BuildContext context) {
                   '${PlayerController.qualityName(dl.kbps)} · sur le téléphone, '
                   'sans données',
               icon: Icons.download_done,
-              selected: !override,
+              selected: pc.currentIsLocal,
               onTap: () => pc.setCurrentSource(useDownload: true),
             ),
           for (final k in PlayerController.qualityChoices)
@@ -395,7 +395,7 @@ void showSourceSheet(BuildContext context) {
               icon: k == null ? Icons.high_quality : Icons.music_note_outlined,
               selected: override
                   ? pc.currentOverrideKbps == k
-                  : dl == null && pc.queueKbps == k,
+                  : !pc.currentIsLocal && pc.queueKbps == k,
               onTap: () => pc.setCurrentSource(kbps: k),
             ),
           Padding(

@@ -20,6 +20,10 @@ class JItem {
   /// Pour une playlist : nombre de morceaux de musique (vidéos exclues).
   final int? musicCount;
 
+  /// Pour une playlist : identifiants de ses morceaux de musique (sert à
+  /// savoir combien sont téléchargés).
+  final List<String>? musicIds;
+
   /// Correction de volume calculée par Jellyfin (dB) pour que tous les
   /// morceaux sonnent au même niveau ; null si pas encore mesuré.
   final double? normalizationGain;
@@ -42,6 +46,7 @@ class JItem {
     this.playlistItemId,
     this.mediaType,
     this.musicCount,
+    this.musicIds,
     this.normalizationGain,
   });
 
@@ -94,7 +99,7 @@ class JItem {
     'NormalizationGain': ?normalizationGain,
   };
 
-  JItem withMusicCount(int n) => JItem(
+  JItem withMusic(List<String> ids) => JItem(
     id: id,
     name: name,
     type: type,
@@ -111,7 +116,8 @@ class JItem {
     childCount: childCount,
     playlistItemId: playlistItemId,
     mediaType: mediaType,
-    musicCount: n,
+    musicCount: ids.length,
+    musicIds: ids,
     normalizationGain: normalizationGain,
   );
 

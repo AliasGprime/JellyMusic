@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellymusic/api/jellyfin_client.dart';
 import 'package:jellymusic/models.dart';
+import 'package:jellymusic/state/download_store.dart';
 import 'package:jellymusic/state/equalizer_store.dart';
 import 'package:jellymusic/state/player_controller.dart';
 import 'package:jellymusic/state/session.dart';
@@ -131,5 +132,21 @@ void main() {
     expect(formatDuration(t.duration), '3:15');
     expect(t.imageItemId, 'b2');
     expect(t.artistLine, 'Artiste');
+  });
+
+  test('état hors connexion des playlists', () {
+    final d = DownloadStore(Session());
+    DownloadEntry e(String id) => DownloadEntry(
+      track: JItem(id: id, name: id, type: 'Audio'),
+      file: '/x/$id.mp3',
+      bytes: 1,
+    );
+    expect(d.offlineStateOf(['a', 'b']), OfflineState.none);
+    d.entries['a'] = e('a');
+    expect(d.offlineStateOf(['a', 'b', 'c']), OfflineState.partial);
+    expect(d.offlineStateOf(['b', 'c']), OfflineState.none);
+    d.entries['b'] = e('b');
+    expect(d.offlineStateOf(['a', 'b']), OfflineState.complete);
+    expect(d.offlineStateOf(null), OfflineState.none);
   });
 }

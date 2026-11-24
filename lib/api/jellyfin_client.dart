@@ -317,7 +317,8 @@ class JellyfinClient {
     ).items.where((p) => p.mediaType == null || p.mediaType == 'Audio');
     return Future.wait(
       all.map(
-        (p) async => p.withMusicCount((await playlistTracks(p.id)).length),
+        (p) async =>
+            p.withMusic([for (final t in await playlistTracks(p.id)) t.id]),
       ),
     );
   }

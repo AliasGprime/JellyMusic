@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models.dart';
+import '../state/download_store.dart';
 import '../state/playlist_store.dart';
 import 'widgets.dart';
 
@@ -306,27 +307,53 @@ Future<void> showAddToPlaylist(
   }
 }
 
-/// Petit symbole à droite d'une playlist : cadenas pour une playlist Spotify
-/// verrouillée, silhouette pour une playlist privée, rien si publique.
+/// Petits symboles à droite d'une playlist : cadenas pour une playlist
+/// Spotify verrouillée, silhouette pour une playlist privée (rien si
+/// publique), et sur téléphone, ses morceaux téléchargés (en partie ou tous).
 class PlaylistBadge extends StatelessWidget {
   final JItem playlist;
   const PlaylistBadge({super.key, required this.playlist});
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final (icon, tip) = playlist.isLocked
         ? (Icons.lock_outline, 'Playlist Spotify verrouillée')
         : playlist.isPrivate
         ? (Icons.person_outline, 'Privée : visible seulement par vous')
         : (null, '');
-    if (icon == null) return const SizedBox.shrink();
-    return Tooltip(
-      message: tip,
-      child: Icon(
-        icon,
-        size: 18,
-        color: Theme.of(context).colorScheme.onSurfaceVariant,
+    final offline = context.select<DownloadStore, OfflineState>(
+      (d) => d.offlineStateOf(playlist.musicIds),
+    );
+    final (dlIcon, dlTip, dlColor) = switch (offline) {
+      OfflineState.none => (null, '', null),
+      OfflineState.partial => (
+        Icons.download_for_offline_outlined,
+        'Téléchargée en partie',
+        scheme.onSurfaceVariant,
       ),
+      OfflineState.complete => (
+        Icons.download_for_offline,
+        'Entièrement téléchargée',
+        scheme.primary,
+      ),
+    };
+    if (icon == null && dlIcon == null) return const SizedBox.shrink();
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (dlIcon != null)
+          Tooltip(
+            message: dlTip,
+            child: Icon(dlIcon, size: 20, color: dlColor),
+          ),
+        if (icon != null && dlIcon != null) const SizedBox(width: 6),
+        if (icon != null)
+          Tooltip(
+            message: tip,
+            child: Icon(icon, size: 18, color: scheme.onSurfaceVariant),
+          ),
+      ],
     );
   }
 }

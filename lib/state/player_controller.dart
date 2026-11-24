@@ -64,6 +64,9 @@ class PlayerController extends ChangeNotifier {
     crossfadeSeconds = (prefs.getInt(_kCrossfade) ?? 0).clamp(0, 12);
     final q = prefs.getInt(_kQuality);
     if (q != null) streamKbps = q == 0 ? null : q;
+    final qm = prefs.getInt(_kQualityMobile);
+    if (qm != null) mobileKbps = qm == 0 ? null : qm;
+    wifiOverDownloads = prefs.getBool(_kWifiOverDownloads) ?? false;
     normalize = prefs.getBool(_kNormalize) ?? false;
     normalizeGain = (prefs.getDouble(_kNormalizeGain) ?? 6).clamp(0.0, 12.0);
     _applyNormalization();
@@ -106,6 +109,8 @@ class PlayerController extends ChangeNotifier {
     );
     // Wi-Fi perdu en pleine écoute en qualité originale : pause et question.
     if (!kIsWeb) {
+      final net = await _network();
+      _lastNet = net == _Net.none ? null : net;
       _subs.add(
         Connectivity().onConnectivityChanged.listen(_onConnectivityChanged),
       );
@@ -152,13 +157,17 @@ class PlayerController extends ChangeNotifier {
   /// qualité de lecture des Paramètres.
   final Map<String, int?> _streamOverride = {};
 
+  /// Morceaux pour lesquels « Version téléchargée » a été choisie dans le
+  /// lecteur (même en Wi-Fi avec « Appliquer même si téléchargé »).
+  final Set<String> _forceLocal = {};
+
   AudioSource _sourceFor(JItem t) {
     final c = _client!;
     _items[t.id] = t;
     // Morceau téléchargé : lu depuis le téléphone (marche hors connexion et
     // n'utilise pas de données), avec sa pochette enregistrée.
     final forced = _streamOverride.containsKey(t.id);
-    final local = forced ? null : downloads?.fileFor(t.id);
+    final local = _playsDownload(t) ? downloads?.fileFor(t.id) : null;
     final localCover = downloads?.coverFor(t.imageItemId);
     final art = localCover != null
         ? Uri.file(localCover)
@@ -228,10 +237,16 @@ class PlayerController extends ChangeNotifier {
     bool shuffle = false,
   }) async {
     if (items.isEmpty || _client == null) return;
-    // Qualité originale en données mobiles : on demande d'abord.
-    final kbps = await _checkMobileData(streamKbps, items);
+    // Qualité selon le réseau (Wi-Fi ou données mobiles) ; originale en
+    // données mobiles : on demande d'abord.
+    final net = await _network();
+    final kbps = await _checkMobileData(
+      net == _Net.mobile ? mobileKbps : streamKbps,
+      items,
+    );
     if (kbps == _cancelled) return;
     _queueKbps = kbps;
+    _queueOnWifi = net == _Net.wifi;
     var list = items;
     var index = start;
     if (shuffle) {
@@ -329,17 +344,36 @@ class PlayerController extends ChangeNotifier {
       return qualityName(_streamOverride[t.id]);
     }
     final d = downloads?.entries[t.id];
-    if (d != null) return 'Téléchargé (${qualityName(d.kbps)})';
+    if (d != null && _playsDownload(t)) {
+      return 'Téléchargé (${qualityName(d.kbps)})';
+    }
     return qualityName(_queueKbps);
   }
 
   /// Vrai si le morceau en cours est lu depuis son téléchargement.
   bool get currentIsLocal {
     final t = current;
-    return t != null &&
-        !_streamOverride.containsKey(t.id) &&
-        (downloads?.isDownloaded(t.id) ?? false);
+    return t != null && _playsDownload(t);
   }
+
+  /// Vrai si [t] est lu depuis son téléchargement : toujours, sauf choix de
+  /// qualité fait dans le lecteur pour ce morceau, ou en Wi-Fi avec
+  /// « Appliquer même si téléchargé » quand le fichier est de moins bonne
+  /// qualité que celle du Wi-Fi.
+  bool _playsDownload(JItem t) {
+    if (_streamOverride.containsKey(t.id)) return false;
+    final d = downloads?.entries[t.id];
+    if (d == null) return false;
+    if (_forceLocal.contains(t.id)) return true;
+    if (_queueOnWifi && wifiOverDownloads && _better(_queueKbps, d.kbps)) {
+      return false;
+    }
+    return true;
+  }
+
+  /// Vrai si le débit [a] est meilleur que [b] (null : original, le
+  /// meilleur).
+  static bool _better(int? a, int? b) => b != null && (a == null || a > b);
 
   /// Vrai si une qualité précise a été choisie pour le morceau en cours.
   bool get currentHasOverride =>
@@ -361,6 +395,7 @@ class PlayerController extends ChangeNotifier {
     if (t == null || idx == null || _client == null) return;
     if (useDownload) {
       _streamOverride.remove(t.id);
+      _forceLocal.add(t.id);
     } else {
       // En données mobiles, la réponse à la question peut remplacer le
       // choix (ex. « MP3 320 kb/s » au lieu de l'originale).
@@ -375,6 +410,7 @@ class PlayerController extends ChangeNotifier {
         return;
       }
       _streamOverride[t.id] = chosen;
+      _forceLocal.remove(t.id);
     }
     final pos = player.position;
     final wasPlaying = player.playing;
@@ -414,7 +450,11 @@ class PlayerController extends ChangeNotifier {
   /// (null). Fourni par l'interface.
   Future<bool?> Function()? confirmWifiLost;
 
-  bool _wasOnMobile = false;
+  /// File lancée en Wi-Fi (pour « Appliquer même si téléchargé »).
+  bool _queueOnWifi = false;
+
+  /// Dernier réseau connu (Wi-Fi ou données mobiles), null au départ.
+  _Net? _lastNet;
   bool _askingWifiLost = false;
 
   /// Vrai si le morceau en cours passe par Internet en qualité originale.
@@ -426,37 +466,74 @@ class PlayerController extends ChangeNotifier {
         : _queueKbps == null;
   }
 
-  Future<void> _onConnectivityChanged(List<ConnectivityResult> r) async {
-    final mobile =
-        r.contains(ConnectivityResult.mobile) &&
-        !r.contains(ConnectivityResult.wifi) &&
-        !r.contains(ConnectivityResult.ethernet);
-    final switched = mobile && !_wasOnMobile;
-    _wasOnMobile = mobile;
-    if (!switched || _askingWifiLost) return;
-    if (!player.playing || !_currentStreamsOriginal) return;
-    final ask = confirmWifiLost;
-    if (ask == null) return;
-    _askingWifiLost = true;
+  static _Net _netOf(List<ConnectivityResult> r) {
+    if (r.contains(ConnectivityResult.wifi) ||
+        r.contains(ConnectivityResult.ethernet)) {
+      return _Net.wifi;
+    }
+    if (r.contains(ConnectivityResult.mobile)) return _Net.mobile;
+    return _Net.none;
+  }
+
+  static Future<_Net> _network() async {
+    if (kIsWeb) return _Net.wifi;
     try {
-      await player.pause();
-      final choice = await ask();
-      if (choice == true) {
-        player.play();
-      } else if (choice == false) {
-        await setStreamKbps(320);
-        await _requeueAt(320);
-        player.play();
-      }
-      // null : on reste en pause.
-    } finally {
-      _askingWifiLost = false;
+      return _netOf(await Connectivity().checkConnectivity());
+    } catch (_) {
+      return _Net.wifi;
     }
   }
 
-  /// Reconstruit la file au débit [kbps] (morceaux non téléchargés), en
-  /// gardant le morceau en cours et l'endroit écouté.
-  Future<void> _requeueAt(int kbps) async {
+  /// Passage du Wi-Fi aux données mobiles (ou l'inverse) : la file en cours
+  /// passe à la qualité de ce réseau, sans perdre l'endroit écouté.
+  Future<void> _onConnectivityChanged(List<ConnectivityResult> r) async {
+    final net = _netOf(r);
+    if (net == _Net.none) return; // coupure passagère entre deux réseaux
+    final prev = _lastNet;
+    _lastNet = net;
+    if (prev == null || prev == net || _askingWifiLost) return;
+    if (player.sequence.isEmpty) return;
+    final wifi = net == _Net.wifi;
+    int? target = wifi ? streamKbps : mobileKbps;
+    final ask = confirmWifiLost;
+    if (!wifi &&
+        target == null &&
+        ask != null &&
+        player.playing &&
+        _currentStreamsOriginal) {
+      // Originale aussi en données mobiles : on demande avant de continuer.
+      _askingWifiLost = true;
+      try {
+        await player.pause();
+        final choice = await ask();
+        if (choice == null) return; // on reste en pause
+        if (choice == false) {
+          await setMobileKbps(320);
+          target = 320;
+        }
+        await _requeueAt(target, wifi: false);
+        player.play();
+      } finally {
+        _askingWifiLost = false;
+      }
+      return;
+    }
+    await _requeueAt(target, wifi: wifi);
+  }
+
+  /// Comment [t] est lu : depuis le téléphone, ou en flux à tel débit.
+  String _plan(JItem t) {
+    if (_playsDownload(t)) return 'local';
+    final k = _streamOverride.containsKey(t.id)
+        ? _streamOverride[t.id]
+        : _queueKbps;
+    return 'k$k';
+  }
+
+  /// Reconstruit la file au débit [kbps] pour le réseau indiqué, en gardant
+  /// le morceau en cours et l'endroit écouté. Rien n'est rechargé si cela ne
+  /// change rien (ex. que des morceaux téléchargés).
+  Future<void> _requeueAt(int? kbps, {required bool wifi}) async {
     final seq = player.sequence;
     final idx = player.currentIndex;
     if (seq.isEmpty || idx == null) return;
@@ -464,9 +541,23 @@ class PlayerController extends ChangeNotifier {
         .whereType<JItem>()
         .toList();
     if (items.length != seq.length) return;
-    final pos = player.position;
+    final before = items.map(_plan).toList();
+    final oldOverride = Map.of(_streamOverride);
+    final oldLocal = Set.of(_forceLocal);
     _streamOverride.clear();
+    _forceLocal.clear();
     _queueKbps = kbps;
+    _queueOnWifi = wifi;
+    final after = items.map(_plan).toList();
+    if (listEquals(before, after)) {
+      // Rien à recharger : on garde aussi les choix faits dans le lecteur.
+      _streamOverride.addAll(oldOverride);
+      _forceLocal.addAll(oldLocal);
+      notifyListeners();
+      return;
+    }
+    final pos = player.position;
+    final wasPlaying = player.playing;
     _endCrossfade();
     await player.setAudioSources(
       items.map(_sourceFor).toList(),
@@ -475,6 +566,7 @@ class PlayerController extends ChangeNotifier {
       shuffleOrder: _order = QueueShuffleOrder(),
     );
     if (player.shuffleModeEnabled) await player.shuffle();
+    if (wasPlaying && !player.playing) player.play();
     notifyListeners();
   }
 
@@ -511,9 +603,9 @@ class PlayerController extends ChangeNotifier {
     final choice = await ask(streamed);
     if (choice == null) return _cancelled;
     if (choice) return null;
-    // MP3 choisi : il devient aussi la qualité de lecture des Paramètres,
-    // pour ne plus reposer la question à chaque morceau.
-    await setStreamKbps(320);
+    // MP3 choisi : il devient la qualité « Données mobiles » des
+    // Paramètres, pour ne plus reposer la question à chaque morceau.
+    await setMobileKbps(320);
     return 320;
   }
 
@@ -524,10 +616,39 @@ class PlayerController extends ChangeNotifier {
   /// Débits proposés (kb/s) ; null : fichier original, sans conversion.
   static const qualityChoices = <int?>[null, 320, 256, 192, 128];
 
+  static const _kQualityMobile = 'player.qualityMobile';
+  static const _kWifiOverDownloads = 'player.wifiOverDownloads';
+
   /// Débit maximal du flux en kb/s (au-delà, conversion en MP3), ou null
-  /// pour le fichier original. Par défaut : original sur le web (réseau
-  /// local), MP3 320 kb/s sur téléphone (données mobiles).
+  /// pour le fichier original. Sur téléphone : qualité en Wi-Fi. Par
+  /// défaut : original sur le web (réseau local), MP3 320 kb/s sur
+  /// téléphone.
   int? streamKbps = kIsWeb ? null : 320;
+
+  /// Téléphone : qualité en données mobiles.
+  int? mobileKbps = 320;
+
+  /// Téléphone, en Wi-Fi : lire en flux, à la qualité du Wi-Fi, les
+  /// morceaux téléchargés en moins bonne qualité.
+  bool wifiOverDownloads = false;
+
+  Future<void> setMobileKbps(int? kbps) async {
+    mobileKbps = kbps;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setInt(
+      _kQualityMobile,
+      kbps ?? 0,
+    );
+  }
+
+  Future<void> setWifiOverDownloads(bool on) async {
+    wifiOverDownloads = on;
+    notifyListeners();
+    await (await SharedPreferences.getInstance()).setBool(
+      _kWifiOverDownloads,
+      on,
+    );
+  }
 
   /// S'applique aux morceaux lancés ensuite (la file en cours garde son
   /// débit).
@@ -962,3 +1083,6 @@ class QueueShuffleOrder extends DefaultShuffleOrder {
     indices.insertAll(at, List.generate(count, (i) => index + i));
   }
 }
+
+/// Réseau utilisé par le téléphone.
+enum _Net { wifi, mobile, none }

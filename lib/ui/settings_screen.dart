@@ -81,7 +81,7 @@ class SettingsScreen extends StatelessWidget {
 class QualityPanel extends StatelessWidget {
   const QualityPanel({super.key});
 
-  static String label(int? kbps) => kbps == null
+  static String qualityLabel(int? kbps) => kbps == null
       ? 'Originale (sans conversion)'
       : 'MP3 $kbps kb/s${kbps == 320 ? ' (meilleur MP3)' : ''}';
 
@@ -102,33 +102,94 @@ class QualityPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final pc = context.watch<PlayerController>();
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          DropdownButtonFormField<int>(
-            // Le menu ne prend pas null comme valeur : 0 = original.
-            initialValue: pc.streamKbps ?? 0,
-            decoration: const InputDecoration(
-              labelText: 'Qualité de lecture',
-              prefixIcon: Icon(Icons.high_quality_outlined),
-              border: OutlineInputBorder(),
+    Widget picker(
+      String label,
+      IconData icon,
+      int? value,
+      ValueChanged<int?> set,
+    ) => DropdownButtonFormField<int>(
+      // Le menu ne prend pas null comme valeur : 0 = original.
+      key: ValueKey('$label$value'),
+      initialValue: value ?? 0,
+      isExpanded: true,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon),
+        border: const OutlineInputBorder(),
+      ),
+      items: [
+        for (final k in PlayerController.qualityChoices)
+          DropdownMenuItem(value: k ?? 0, child: Text(qualityLabel(k))),
+      ],
+      onChanged: (v) => set(v == null || v == 0 ? null : v),
+    );
+    // Navigateur : une seule qualité.
+    if (kIsWeb) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            picker(
+              'Qualité de lecture',
+              Icons.high_quality_outlined,
+              pc.streamKbps,
+              pc.setStreamKbps,
             ),
-            items: [
-              for (final k in PlayerController.qualityChoices)
-                DropdownMenuItem(value: k ?? 0, child: Text(label(k))),
-            ],
-            onChanged: (v) => pc.setStreamKbps(v == null || v == 0 ? null : v),
+            const SizedBox(height: 6),
+            Text(
+              '${help(pc.streamKbps)}\nS\'applique aux morceaux lancés ensuite. '
+              'Réglage gardé dans ce navigateur.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: picker(
+            'Qualité audio en Wi-Fi',
+            Icons.wifi,
+            pc.streamKbps,
+            pc.setStreamKbps,
           ),
-          const SizedBox(height: 6),
-          Text(
-            '${help(pc.streamKbps)}\nS\'applique aux morceaux lancés ensuite. '
-            '${kIsWeb ? 'Réglage gardé dans ce navigateur.' : 'Réglage gardé sur ce téléphone.'}',
+        ),
+        SwitchListTile(
+          contentPadding: const EdgeInsets.fromLTRB(16, 0, 8, 0),
+          title: const Text('Appliquer même si téléchargé'),
+          subtitle: const Text(
+            'En Wi-Fi, un morceau téléchargé en plus basse qualité est lu '
+            'par Internet dans la qualité ci-dessus.',
+          ),
+          value: pc.wifiOverDownloads,
+          onChanged: pc.setWifiOverDownloads,
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: picker(
+            'Qualité audio en données mobiles',
+            Icons.signal_cellular_alt,
+            pc.mobileKbps,
+            pc.setMobileKbps,
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+          child: Text(
+            'La qualité change toute seule quand le téléphone passe du Wi-Fi '
+            'aux données mobiles, sans perdre l\'endroit écouté. Sinon, les '
+            'morceaux téléchargés sont toujours lus en priorité.\n'
+            'Originale : vos fichiers tels quels (ex. FLAC, environ '
+            '1,6 Mb/s). MP3 320 : environ 5 fois moins de données. '
+            'Réglages gardés sur ce téléphone.',
             style: theme.textTheme.bodySmall,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

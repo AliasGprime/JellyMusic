@@ -276,7 +276,9 @@ Future<bool?> showMobileDataDialog(BuildContext context, int trackCount) {
         'utilise environ 12 Mo de données par morceau, contre 2 à 3 Mo en '
         'MP3 320 kb/s.'
         '${trackCount > 1 ? '\n\n$trackCount morceaux à écouter par Internet '
-                  '(les morceaux téléchargés sont lus depuis le téléphone).' : ''}',
+                  '(les morceaux téléchargés sont lus depuis le téléphone).' : ''}'
+        '\n\nChoisir MP3 320 kb/s le garde aussi comme qualité de lecture '
+        '(Paramètres) : la question ne reviendra plus.',
       ),
       actionsOverflowDirection: VerticalDirection.down,
       actionsOverflowButtonSpacing: 4,

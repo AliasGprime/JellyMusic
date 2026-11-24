@@ -376,7 +376,11 @@ class PlayerController extends ChangeNotifier {
     if (ask == null) return kbps;
     final choice = await ask(streamed);
     if (choice == null) return _cancelled;
-    return choice ? null : 320;
+    if (choice) return null;
+    // MP3 choisi : il devient aussi la qualité de lecture des Paramètres,
+    // pour ne plus reposer la question à chaque morceau.
+    await setStreamKbps(320);
+    return 320;
   }
 
   // ---- Qualité de lecture ----

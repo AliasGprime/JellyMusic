@@ -1,11 +1,15 @@
+import 'dart:io';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models.dart';
+import '../state/download_store.dart';
 import '../state/player_controller.dart';
 import '../state/session.dart';
 import 'album_screen.dart';
+import 'downloads.dart';
 import 'layout.dart';
 import 'playlist_picker.dart';
 
@@ -37,6 +41,23 @@ class CoverImage extends StatelessWidget {
       color: scheme.surfaceContainerHighest,
       child: Icon(fallback, size: size * 0.5, color: scheme.onSurfaceVariant),
     );
+    // Pochette enregistrée avec un téléchargement : affichée même hors
+    // connexion.
+    final local = context.select<DownloadStore, String?>(
+      (d) => d.coverFor(itemId),
+    );
+    if (local != null) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(radius),
+        child: Image.file(
+          File(local),
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => placeholder,
+        ),
+      );
+    }
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: url == null
@@ -104,15 +125,39 @@ class TrackTile extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
         style: TextStyle(color: color),
       ),
-      subtitle: Text(
-        [
-          t.artistLine,
-          // Sur ordinateur, il y a la place d'afficher l'album.
-          if (isWide(context) && showCover) t.album ?? '',
-          formatDuration(t.duration),
-        ].where((s) => s.isNotEmpty).join(' · '),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      subtitle: _DownloadStatus(
+        trackId: t.id,
+        child: Row(
+          children: [
+            // Morceau déjà téléchargé sur le téléphone.
+            if (context.select<DownloadStore, bool>(
+              (d) => d.isDownloaded(t.id),
+            ))
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Tooltip(
+                  message: 'Téléchargé',
+                  child: Icon(
+                    Icons.download_done,
+                    size: 16,
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ),
+              ),
+            Flexible(
+              child: Text(
+                [
+                  t.artistLine,
+                  // Sur ordinateur, il y a la place d'afficher l'album.
+                  if (isWide(context) && showCover) t.album ?? '',
+                  formatDuration(t.duration),
+                ].where((s) => s.isNotEmpty).join(' · '),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
       ),
       onTap: () => player.playItems(tracks, start: index),
       trailing: Row(
@@ -122,6 +167,69 @@ class TrackTile extends StatelessWidget {
           ?dragHandle,
         ],
       ),
+    );
+  }
+}
+
+/// Sous-titre d'un morceau, avec l'état de son téléchargement : sablier s'il
+/// attend son tour, barre de progression pendant le téléchargement.
+class _DownloadStatus extends StatelessWidget {
+  final String trackId;
+  final Widget child;
+  const _DownloadStatus({required this.trackId, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final (queued, progress) = context.select<DownloadStore, (bool, double?)>(
+      (d) => (d.isQueued(trackId), d.progressOf(trackId)),
+    );
+    if (!queued && progress == null) return child;
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        child,
+        const SizedBox(height: 4),
+        if (progress != null)
+          Row(
+            children: [
+              Icon(Icons.downloading, size: 14, color: scheme.primary),
+              const SizedBox(width: 6),
+              Expanded(
+                child: LinearProgressIndicator(
+                  value: progress < 0 ? null : progress,
+                  minHeight: 3,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              if (progress >= 0)
+                SizedBox(
+                  width: 40,
+                  child: Text(
+                    '${(progress * 100).round()} %',
+                    textAlign: TextAlign.right,
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ),
+            ],
+          )
+        else
+          Row(
+            children: [
+              Icon(
+                Icons.hourglass_empty,
+                size: 14,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'En attente de téléchargement',
+                style: Theme.of(context).textTheme.labelSmall,
+              ),
+            ],
+          ),
+      ],
     );
   }
 }
@@ -153,6 +261,13 @@ class TrackMenu extends StatelessWidget {
             showAddToPlaylist(context, tracks: [track]);
           case 'remove':
             onRemove?.call();
+          case 'download':
+            showDownloadDialog(context, tracks: [track]);
+          case 'undownload':
+            context.read<DownloadStore>().remove(track.id);
+            messenger.showSnackBar(
+              const SnackBar(content: Text('Téléchargement supprimé')),
+            );
           case 'album':
             if (track.albumId != null) {
               Navigator.of(context).push(
@@ -178,6 +293,16 @@ class TrackMenu extends StatelessWidget {
             value: 'remove',
             child: Text('Retirer de la playlist'),
           ),
+        if (context.read<DownloadStore>().supported)
+          context.read<DownloadStore>().isDownloaded(track.id)
+              ? const PopupMenuItem(
+                  value: 'undownload',
+                  child: Text('Supprimer le téléchargement'),
+                )
+              : const PopupMenuItem(
+                  value: 'download',
+                  child: Text('Télécharger…'),
+                ),
         if (track.albumId != null)
           const PopupMenuItem(value: 'album', child: Text('Voir l\'album')),
       ],
@@ -554,6 +679,19 @@ class ErrorRetry extends StatelessWidget {
             Text('$error', textAlign: TextAlign.center),
             const SizedBox(height: 12),
             OutlinedButton(onPressed: onRetry, child: const Text('Réessayer')),
+            // Hors connexion : les morceaux téléchargés restent écoutables.
+            if (context.select<DownloadStore, bool>(
+              (d) => d.supported && d.entries.isNotEmpty,
+            )) ...[
+              const SizedBox(height: 8),
+              FilledButton.tonalIcon(
+                onPressed: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                ),
+                icon: const Icon(Icons.download_done),
+                label: const Text('Écouter les téléchargements'),
+              ),
+            ],
           ],
         ),
       ),

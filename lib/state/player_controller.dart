@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../api/jellyfin_client.dart';
 import '../audio/eq_bridge.dart';
 import '../models.dart';
+import 'download_store.dart';
 import 'session.dart';
 
 /// Lecteur audio : file d'attente, contrôles et rapports d'écoute à Jellyfin.
@@ -24,7 +25,10 @@ class PlayerController extends ChangeNotifier {
   Duration _lastPosition = Duration.zero;
   String? lastError;
 
-  PlayerController(this.session) {
+  /// Morceaux téléchargés : lus depuis le téléphone, même hors connexion.
+  final DownloadStore? downloads;
+
+  PlayerController(this.session, [this.downloads]) {
     _init();
   }
 
@@ -121,21 +125,41 @@ class PlayerController extends ChangeNotifier {
     return tag is MediaItem ? _items[tag.id] : null;
   }
 
+  /// Choix de qualité fait dans le lecteur pour un morceau précis : il est
+  /// alors lu en flux à ce débit (null : original), même s'il est
+  /// téléchargé. Sans choix : version téléchargée d'abord, sinon la
+  /// qualité de lecture des Paramètres.
+  final Map<String, int?> _streamOverride = {};
+
   AudioSource _sourceFor(JItem t) {
     final c = _client!;
     _items[t.id] = t;
-    final art = c.imageUrl(t.imageItemId, maxWidth: 600);
+    // Morceau téléchargé : lu depuis le téléphone (marche hors connexion et
+    // n'utilise pas de données), avec sa pochette enregistrée.
+    final forced = _streamOverride.containsKey(t.id);
+    final local = forced ? null : downloads?.fileFor(t.id);
+    final localCover = downloads?.coverFor(t.imageItemId);
+    final art = localCover != null
+        ? Uri.file(localCover)
+        : switch (c.imageUrl(t.imageItemId, maxWidth: 600)) {
+            final String u => Uri.parse(u),
+            null => null,
+          };
+    final tag = MediaItem(
+      id: t.id,
+      title: t.name,
+      artist: t.artistLine,
+      album: t.album,
+      duration: t.duration,
+      artUri: art,
+    );
+    if (local != null) return AudioSource.file(local, tag: tag);
     return AudioSource.uri(
-      Uri.parse(c.streamUrl(t.id, maxKbps: streamKbps)),
-      headers: kIsWeb ? null : c.streamHeaders,
-      tag: MediaItem(
-        id: t.id,
-        title: t.name,
-        artist: t.artistLine,
-        album: t.album,
-        duration: t.duration,
-        artUri: art == null ? null : Uri.parse(art),
+      Uri.parse(
+        c.streamUrl(t.id, maxKbps: forced ? _streamOverride[t.id] : streamKbps),
       ),
+      headers: kIsWeb ? null : c.streamHeaders,
+      tag: tag,
     );
   }
 
@@ -231,6 +255,69 @@ class PlayerController extends ChangeNotifier {
 
   void _applyVolume() =>
       player.setVolume(volume.value * _fadeGain * _trackFactor);
+
+  // ---- Qualité du morceau en cours (bouton du lecteur) ----
+
+  /// Version du morceau en cours : « Téléchargé (MP3 192 kb/s) »,
+  /// « Originale », « MP3 320 kb/s »…
+  String get currentSourceLabel {
+    final t = current;
+    if (t == null) return '';
+    if (_streamOverride.containsKey(t.id)) {
+      return qualityName(_streamOverride[t.id]);
+    }
+    final d = downloads?.entries[t.id];
+    if (d != null) return 'Téléchargé (${qualityName(d.kbps)})';
+    return qualityName(streamKbps);
+  }
+
+  /// Vrai si le morceau en cours est lu depuis son téléchargement.
+  bool get currentIsLocal {
+    final t = current;
+    return t != null &&
+        !_streamOverride.containsKey(t.id) &&
+        (downloads?.isDownloaded(t.id) ?? false);
+  }
+
+  /// Vrai si une qualité précise a été choisie pour le morceau en cours.
+  bool get currentHasOverride =>
+      current != null && _streamOverride.containsKey(current!.id);
+
+  /// Débit choisi pour le morceau en cours (si [currentHasOverride]).
+  int? get currentOverrideKbps =>
+      current == null ? null : _streamOverride[current!.id];
+
+  static String qualityName(int? kbps) =>
+      kbps == null ? 'Originale' : 'MP3 $kbps kb/s';
+
+  /// Change la version du morceau en cours sans perdre l'endroit écouté :
+  /// [useDownload] pour revenir au fichier du téléphone, sinon flux au
+  /// débit [kbps] (null : original).
+  Future<void> setCurrentSource({bool useDownload = false, int? kbps}) async {
+    final t = current;
+    final idx = player.currentIndex;
+    if (t == null || idx == null || _client == null) return;
+    if (useDownload) {
+      _streamOverride.remove(t.id);
+    } else {
+      _streamOverride[t.id] = kbps;
+    }
+    final pos = player.position;
+    final wasPlaying = player.playing;
+    _endCrossfade();
+    // En pause le temps du remplacement : le morceau suivant ne doit pas
+    // démarrer une fraction de seconde.
+    if (wasPlaying) await player.pause();
+    // Remplace le morceau sur place, à la même position dans la file (y
+    // compris en aléatoire).
+    final orderPos = player.effectiveIndices.indexOf(idx);
+    await player.removeAudioSourceAt(idx);
+    _order?.insertAtPosition = orderPos < 0 ? null : orderPos;
+    await player.insertAudioSource(idx, _sourceFor(t));
+    await player.seek(pos, index: idx);
+    if (wasPlaying) player.play();
+    notifyListeners();
+  }
 
   // ---- Qualité de lecture ----
 
@@ -658,15 +745,22 @@ class QueueShuffleOrder extends DefaultShuffleOrder {
   /// null : à la fin.
   int? insertAfter;
 
+  /// Position exacte (dans l'ordre de lecture) où insérer, prioritaire sur
+  /// [insertAfter] : sert à remplacer un morceau sur place.
+  int? insertAtPosition;
+
   @override
   void insert(int index, int count) {
     for (var i = 0; i < indices.length; i++) {
       if (indices[i] >= index) indices[i] += count;
     }
     final anchor = insertAfter;
+    final pos = insertAtPosition;
     insertAfter = null;
+    insertAtPosition = null;
     var at = anchor == null ? -1 : indices.indexOf(anchor);
     at = at < 0 ? indices.length : at + 1;
+    if (pos != null) at = pos.clamp(0, indices.length);
     indices.insertAll(at, List.generate(count, (i) => index + i));
   }
 }

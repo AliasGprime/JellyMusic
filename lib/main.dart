@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:provider/provider.dart';
 
+import 'state/download_store.dart';
 import 'state/equalizer_store.dart';
 import 'state/player_controller.dart';
 import 'state/playlist_store.dart';
@@ -23,19 +24,29 @@ Future<void> main() async {
   }
   final session = Session();
   await session.load();
-  runApp(JellyMusicApp(session: session));
+  final downloads = DownloadStore(session);
+  await downloads.init();
+  runApp(JellyMusicApp(session: session, downloads: downloads));
 }
 
 class JellyMusicApp extends StatelessWidget {
   final Session session;
-  const JellyMusicApp({super.key, required this.session});
+  final DownloadStore downloads;
+  const JellyMusicApp({
+    super.key,
+    required this.session,
+    required this.downloads,
+  });
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider.value(value: session),
-        ChangeNotifierProvider(create: (_) => PlayerController(session)),
+        ChangeNotifierProvider.value(value: downloads),
+        ChangeNotifierProvider(
+          create: (_) => PlayerController(session, downloads),
+        ),
         ChangeNotifierProvider(create: (_) => PlaylistStore(session)),
         ChangeNotifierProvider(
           create: (_) => EqualizerStore(session),

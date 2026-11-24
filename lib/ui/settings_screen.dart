@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../state/equalizer_store.dart';
 import '../state/player_controller.dart';
 import '../state/session.dart';
+import 'downloads.dart';
 import 'mini_player.dart';
 
 class SettingsScreen extends StatelessWidget {
@@ -54,6 +55,8 @@ class SettingsScreen extends StatelessWidget {
           const NormalizePanel(),
           const Divider(indent: 16, endIndent: 16),
           const CrossfadePanel(),
+          section('Téléchargements'),
+          const DownloadsSettings(),
           section('Égaliseur'),
           const EqualizerPanel(),
           section('À propos'),

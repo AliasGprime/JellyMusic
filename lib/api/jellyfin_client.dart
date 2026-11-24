@@ -456,6 +456,28 @@ class JellyfinClient {
 
   /// En-têtes d'authentification pour le flux audio. Jellyfin 12 n'accepte
   /// plus le jeton dans l'URL (api_key) : il doit passer dans un en-tête.
+  /// Débit des fichiers originaux (bits/s) de chaque morceau, pour estimer
+  /// la place d'un téléchargement en qualité originale.
+  Future<Map<String, int>> sourceBitrates(List<String> ids) async {
+    final out = <String, int>{};
+    for (var i = 0; i < ids.length; i += 100) {
+      final chunk = ids.skip(i).take(100).join(',');
+      final j = await _get('/Items', {
+        'userId': userId!,
+        'Ids': chunk,
+        'Fields': 'MediaSources',
+      }) as Map<String, dynamic>;
+      for (final it in (j['Items'] as List? ?? const [])) {
+        final sources = it['MediaSources'] as List?;
+        final bitrate = sources == null || sources.isEmpty
+            ? null
+            : (sources.first as Map)['Bitrate'];
+        if (bitrate is num) out[it['Id'] as String] = bitrate.toInt();
+      }
+    }
+    return out;
+  }
+
   Map<String, String> get streamHeaders => {
     'Authorization': _authHeader,
     'X-Emby-Authorization': _authHeader,

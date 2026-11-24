@@ -6,6 +6,7 @@ import '../state/player_controller.dart';
 import '../state/playlist_store.dart';
 import '../state/session.dart';
 import 'artist_screen.dart';
+import 'downloads.dart';
 import 'layout.dart';
 import 'mini_player.dart';
 import 'player_bar.dart';
@@ -71,12 +72,18 @@ class _HomeScreenState extends State<HomeScreen> {
     tooltip: 'Plus d\'options',
     onSelected: (v) {
       if (v == 'settings') _openSettings(context);
+      if (v == 'downloads') {
+        Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const DownloadsScreen()));
+      }
       if (v == 'shuffle') _shuffleAll();
       if (v == 'update') checkForUpdates(context, manual: true);
       if (v == 'logout') _logout();
     },
     itemBuilder: (_) => [
       const PopupMenuItem(value: 'shuffle', child: Text('Tout en aléatoire')),
+      if (!kIsWeb)
+        const PopupMenuItem(value: 'downloads', child: Text('Téléchargements')),
       const PopupMenuItem(value: 'settings', child: Text('Paramètres')),
       if (!kIsWeb)
         const PopupMenuItem(

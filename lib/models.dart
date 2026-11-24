@@ -73,6 +73,27 @@ class JItem {
     );
   }
 
+  /// Même forme que les réponses de Jellyfin : relu par [JItem.fromJson]
+  /// (ex. pour les morceaux téléchargés, consultables hors connexion).
+  Map<String, dynamic> toJson() => {
+    'Id': id,
+    'Name': name,
+    'Type': type,
+    'AlbumId': ?albumId,
+    'Album': ?album,
+    'AlbumArtist': ?albumArtist,
+    'Artists': artists,
+    'IndexNumber': ?indexNumber,
+    'ParentIndexNumber': ?discNumber,
+    'ProductionYear': ?productionYear,
+    if (duration != null) 'RunTimeTicks': duration!.inMicroseconds * 10,
+    'ImageTags': {if (hasPrimaryImage) 'Primary': 'x'},
+    'AlbumPrimaryImageTag': ?albumPrimaryImageTag,
+    'ChildCount': ?childCount,
+    'MediaType': ?mediaType,
+    'NormalizationGain': ?normalizationGain,
+  };
+
   JItem withMusicCount(int n) => JItem(
     id: id,
     name: name,

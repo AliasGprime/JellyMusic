@@ -78,6 +78,21 @@ class PlayerScreen extends StatelessWidget {
           color: theme.colorScheme.onSurfaceVariant,
         ),
       ),
+      const SizedBox(height: 8),
+      // Version écoutée (téléchargée, originale, MP3…) : touchez pour changer.
+      Center(
+        child: ActionChip(
+          avatar: Icon(
+            pc.currentIsLocal
+                ? Icons.download_done
+                : Icons.high_quality_outlined,
+            size: 18,
+          ),
+          label: Text(pc.currentSourceLabel),
+          tooltip: 'Changer la qualité de ce morceau',
+          onPressed: () => showSourceSheet(context),
+        ),
+      ),
       if (pc.lastError != null)
         Padding(
           padding: const EdgeInsets.only(top: 8),
@@ -246,6 +261,83 @@ class _SeekAndLoopControls extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Choix de la version du morceau en cours : téléchargée, originale ou MP3.
+void showSourceSheet(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    useSafeArea: true,
+    showDragHandle: true,
+    constraints: const BoxConstraints(maxWidth: 520),
+    builder: (context) {
+      final pc = context.watch<PlayerController>();
+      final t = pc.current;
+      final dl = t == null ? null : pc.downloads?.entries[t.id];
+      final override = pc.currentHasOverride;
+      Widget option({
+        required String title,
+        String? subtitle,
+        required IconData icon,
+        required bool selected,
+        required VoidCallback onTap,
+      }) => ListTile(
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: subtitle == null ? null : Text(subtitle),
+        trailing: selected ? const Icon(Icons.check) : null,
+        selected: selected,
+        onTap: () {
+          Navigator.of(context).pop();
+          onTap();
+        },
+      );
+      return ListView(
+        shrinkWrap: true,
+        // Au-dessus des boutons d'Android.
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.of(context).viewPadding.bottom,
+        ),
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            child: Text(
+              'Qualité de ce morceau',
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+          ),
+          if (dl != null)
+            option(
+              title: 'Version téléchargée',
+              subtitle:
+                  '${PlayerController.qualityName(dl.kbps)} · sur le téléphone, '
+                  'sans données',
+              icon: Icons.download_done,
+              selected: !override,
+              onTap: () => pc.setCurrentSource(useDownload: true),
+            ),
+          for (final k in PlayerController.qualityChoices)
+            option(
+              title: k == null ? 'Originale (sans conversion)' : 'MP3 $k kb/s',
+              subtitle: k == null ? 'Meilleure qualité, plus de données' : null,
+              icon: k == null ? Icons.high_quality : Icons.music_note_outlined,
+              selected: override
+                  ? pc.currentOverrideKbps == k
+                  : dl == null && pc.streamKbps == k,
+              onTap: () => pc.setCurrentSource(kbps: k),
+            ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+            child: Text(
+              'Ne change que ce morceau. Les suivants gardent la version '
+              'téléchargée en priorité, sinon la qualité des Paramètres.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 void showQueueSheet(BuildContext context) {

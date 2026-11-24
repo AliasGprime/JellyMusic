@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models.dart';
+import '../state/download_store.dart';
 import '../state/playlist_store.dart';
 import '../state/session.dart';
+import 'downloads.dart';
 import 'mini_player.dart';
 import 'playlist_picker.dart';
 import 'search_screen.dart';
@@ -228,6 +230,13 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
         builder: (_) => SearchScreen(target: _pl, targetName: _name),
       ),
     );
+  }
+
+  /// Télécharge toute la playlist pour l'écoute sans connexion.
+  void _download() {
+    final tracks = _tracks;
+    if (tracks == null || tracks.isEmpty) return;
+    showDownloadDialog(context, tracks: tracks, playlist: _pl);
   }
 
   /// Rend la playlist privée (seulement ce compte) ou publique (tous).
@@ -496,6 +505,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               if (v == 'private') _setPrivate(true);
               if (v == 'public') _setPrivate(false);
               if (v == 'clone') _clone();
+              if (v == 'download') _download();
               if (v == 'delete') _delete();
             },
             itemBuilder: (_) => [
@@ -527,6 +537,15 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
+              if (context.read<DownloadStore>().supported)
+                const PopupMenuItem(
+                  value: 'download',
+                  child: ListTile(
+                    leading: Icon(Icons.download_outlined),
+                    title: Text('Télécharger la playlist'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
               if (!_locked)
                 const PopupMenuItem(
                   value: 'delete',

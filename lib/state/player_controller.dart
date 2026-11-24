@@ -17,7 +17,21 @@ import 'session.dart';
 /// Lecteur audio : file d'attente, contrôles et rapports d'écoute à Jellyfin.
 class PlayerController extends ChangeNotifier {
   final Session session;
-  final AudioPlayer player = AudioPlayer();
+  final AudioPlayer player = AudioPlayer(
+    // Android : garder en mémoire la partie déjà écoutée (par défaut, rien
+    // n'est gardé : reculer obligeait à tout retélécharger, et Jellyfin à
+    // reconvertir), charger plus loin devant, et repartir plus vite après
+    // un déplacement.
+    audioLoadConfiguration: const AudioLoadConfiguration(
+      androidLoadControl: AndroidLoadControl(
+        minBufferDuration: Duration(seconds: 60),
+        maxBufferDuration: Duration(minutes: 2),
+        bufferForPlaybackDuration: Duration(seconds: 1),
+        bufferForPlaybackAfterRebufferDuration: Duration(seconds: 2),
+        backBufferDuration: Duration(minutes: 10),
+      ),
+    ),
+  );
   final Map<String, JItem> _items = {};
   final List<StreamSubscription> _subs = [];
   Timer? _progressTimer;
@@ -168,10 +182,19 @@ class PlayerController extends ChangeNotifier {
         options: _seekableLocal,
       );
     }
+    final kbps = forced ? _streamOverride[t.id] : _queueKbps;
+    // Android, qualité MP3 : flux en segments (HLS), pour des déplacements
+    // rapides dans le morceau. Originale : le fichier tel quel (déjà
+    // déplaçable). Web : les navigateurs ne lisent pas le HLS.
+    if (!kIsWeb && kbps != null) {
+      return HlsAudioSource(
+        Uri.parse(c.hlsUrl(t.id, kbps)),
+        tag: tag,
+        duration: t.duration,
+      );
+    }
     return ProgressiveAudioSource(
-      Uri.parse(
-        c.streamUrl(t.id, maxKbps: forced ? _streamOverride[t.id] : _queueKbps),
-      ),
+      Uri.parse(c.streamUrl(t.id, maxKbps: kbps)),
       headers: kIsWeb ? null : c.streamHeaders,
       tag: tag,
       duration: t.duration,

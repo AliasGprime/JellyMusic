@@ -456,6 +456,25 @@ class JellyfinClient {
 
   /// En-têtes d'authentification pour le flux audio. Jellyfin 12 n'accepte
   /// plus le jeton dans l'URL (api_key) : il doit passer dans un en-tête.
+  /// Flux HLS (morceaux de 3 secondes) converti en MP3 à [kbps] : le
+  /// lecteur ne charge que le segment utile, donc se déplacer dans le
+  /// morceau est rapide (un flux MP3 continu obligerait à tout télécharger
+  /// jusqu'à l'endroit voulu). Le jeton est dans l'adresse : il est repris
+  /// par Jellyfin dans l'adresse de chaque segment.
+  String hlsUrl(String itemId, int kbps) => _uri('/Audio/$itemId/main.m3u8', {
+    'UserId': userId!,
+    'DeviceId': deviceId,
+    'ApiKey': token!,
+    'MediaSourceId': itemId,
+    'AudioCodec': 'mp3',
+    'AudioBitRate': '${kbps * 1000}',
+    'SegmentContainer': 'ts',
+    // Une session de lecture par morceau lancé (Jellyfin y range ses
+    // conversions en cours).
+    'PlaySessionId':
+        '${itemId.substring(0, 8)}${DateTime.now().millisecondsSinceEpoch}',
+  }).toString();
+
   /// Débit des fichiers originaux (bits/s) de chaque morceau, pour estimer
   /// la place d'un téléchargement en qualité originale.
   Future<Map<String, int>> sourceBitrates(List<String> ids) async {

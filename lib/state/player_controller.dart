@@ -311,11 +311,19 @@ class PlayerController extends ChangeNotifier {
     if (useDownload) {
       _streamOverride.remove(t.id);
     } else {
-      if (await _checkMobileData(kbps, [t], ignoreDownloads: true) ==
-          _cancelled) {
+      // En données mobiles, la réponse à la question peut remplacer le
+      // choix (ex. « MP3 320 kb/s » au lieu de l'originale).
+      final chosen = await _checkMobileData(kbps, [t], ignoreDownloads: true);
+      if (chosen == _cancelled) return;
+      // Déjà dans cette qualité : rien à recharger.
+      if (!currentIsLocal &&
+          (_streamOverride.containsKey(t.id)
+              ? _streamOverride[t.id] == chosen
+              : _queueKbps == chosen)) {
+        notifyListeners();
         return;
       }
-      _streamOverride[t.id] = kbps;
+      _streamOverride[t.id] = chosen;
     }
     final pos = player.position;
     final wasPlaying = player.playing;

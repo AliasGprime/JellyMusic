@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../state/download_store.dart';
 import '../state/player_controller.dart';
+import 'downloads.dart';
 import 'layout.dart';
 import 'player_screen.dart';
 import 'widgets.dart';
@@ -19,17 +21,24 @@ class MiniPlayer extends StatelessWidget {
     if (PlayerBarScope.active(context)) return const SizedBox.shrink();
     final pc = context.watch<PlayerController>();
     final t = pc.current;
+    // Téléchargements en cours : barre avec « Arrêter », sur tous les écrans.
+    final downloading = context.select<DownloadStore, bool>((d) => d.busy);
     if (t == null) {
       // Rien ne joue : on réserve quand même la place des boutons système,
       // sinon les messages (« Annuler », etc.) passent dessous.
-      return SizedBox(
+      final spacer = SizedBox(
         height: bottomSafe ? MediaQuery.paddingOf(context).bottom : 0,
+      );
+      if (!downloading) return spacer;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [const DownloadBar(), spacer],
       );
     }
     final player = pc.player;
     final scheme = Theme.of(context).colorScheme;
 
-    return Material(
+    final playerBar = Material(
       color: scheme.surfaceContainerHigh,
       child: SafeArea(
         top: false,
@@ -103,6 +112,11 @@ class MiniPlayer extends StatelessWidget {
           ),
         ),
       ),
+    );
+    if (!downloading) return playerBar;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [const DownloadBar(), playerBar],
     );
   }
 }

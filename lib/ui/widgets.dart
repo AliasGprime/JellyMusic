@@ -263,6 +263,19 @@ class TrackMenu extends StatelessWidget {
             onRemove?.call();
           case 'download':
             showDownloadDialog(context, tracks: [track]);
+          case 'canceldl':
+            final cancelled = context.read<DownloadStore>().cancelTrack(
+              track.id,
+            );
+            messenger.showSnackBar(
+              SnackBar(
+                content: Text(
+                  cancelled
+                      ? 'Téléchargement annulé'
+                      : 'Trop tard : ce morceau venait d\'être téléchargé',
+                ),
+              ),
+            );
           case 'undownload':
             context.read<DownloadStore>().remove(track.id);
             messenger.showSnackBar(
@@ -294,7 +307,13 @@ class TrackMenu extends StatelessWidget {
             child: Text('Retirer de la playlist'),
           ),
         if (context.read<DownloadStore>().supported)
-          context.read<DownloadStore>().isDownloaded(track.id)
+          (context.read<DownloadStore>().isQueued(track.id) ||
+                  context.read<DownloadStore>().progressOf(track.id) != null)
+              ? const PopupMenuItem(
+                  value: 'canceldl',
+                  child: Text('Annuler ce téléchargement'),
+                )
+              : context.read<DownloadStore>().isDownloaded(track.id)
               ? const PopupMenuItem(
                   value: 'undownload',
                   child: Text('Supprimer le téléchargement'),

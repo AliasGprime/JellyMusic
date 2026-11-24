@@ -205,8 +205,91 @@ class DownloadProgress extends StatelessWidget {
                 ],
               ),
             ),
-            TextButton(onPressed: d.cancel, child: const Text('Arrêter')),
+            TextButton(
+              onPressed: () => stopAllDownloads(context),
+              child: const Text('Arrêter'),
+            ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Arrête tous les téléchargements en cours, avec un message.
+void stopAllDownloads(BuildContext context) {
+  final d = context.read<DownloadStore>();
+  final kept = d.done;
+  d.cancel();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(
+        'Téléchargements arrêtés'
+        '${kept > 0 ? ' ($kept morceau(x) déjà téléchargé(s) gardé(s))' : ''}',
+      ),
+    ),
+  );
+}
+
+/// Petite barre affichée au bas de tous les écrans (au-dessus du lecteur)
+/// tant que des téléchargements sont en cours, avec un bouton « Arrêter ».
+class DownloadBar extends StatelessWidget {
+  const DownloadBar({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final d = context.watch<DownloadStore>();
+    if (!d.busy) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final n = (d.done + d.failed + 1).clamp(1, d.total < 1 ? 1 : d.total);
+    return Material(
+      color: scheme.secondaryContainer,
+      child: InkWell(
+        onTap: () => Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const DownloadsScreen())),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+          child: Row(
+            children: [
+              Icon(Icons.downloading, color: scheme.onSecondaryContainer),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Téléchargement $n sur ${d.total}'
+                      '${d.current != null ? ' · ${d.current!.name}' : ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(color: scheme.onSecondaryContainer),
+                    ),
+                    const SizedBox(height: 4),
+                    LinearProgressIndicator(
+                      value: d.total > 0
+                          ? ((d.done +
+                                        d.failed +
+                                        (d.currentProgress < 0
+                                            ? 0
+                                            : d.currentProgress)) /
+                                    d.total)
+                                .clamp(0.0, 1.0)
+                          : null,
+                      minHeight: 3,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => stopAllDownloads(context),
+                icon: const Icon(Icons.stop_circle_outlined),
+                label: const Text('Arrêter'),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -241,7 +324,6 @@ class DownloadsScreen extends StatelessWidget {
       bottomNavigationBar: const MiniPlayer(),
       body: ListView(
         children: [
-          const DownloadProgress(),
           if (tracks.isEmpty && !d.busy)
             const Padding(
               padding: EdgeInsets.all(32),
@@ -334,7 +416,6 @@ class _DownloadedPlaylistScreen extends StatelessWidget {
       bottomNavigationBar: const MiniPlayer(),
       body: ListView(
         children: [
-          const DownloadProgress(),
           if (tracks.isNotEmpty) PlayButtons(loadTracks: () async => tracks),
           for (var i = 0; i < tracks.length; i++)
             TrackTile(tracks: tracks, index: i),

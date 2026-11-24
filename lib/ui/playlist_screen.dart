@@ -506,6 +506,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
               if (v == 'public') _setPrivate(false);
               if (v == 'clone') _clone();
               if (v == 'download') _download();
+              if (v == 'stopdl') stopAllDownloads(context);
               if (v == 'delete') _delete();
             },
             itemBuilder: (_) => [
@@ -537,6 +538,15 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
                   contentPadding: EdgeInsets.zero,
                 ),
               ),
+              if (context.read<DownloadStore>().busy)
+                const PopupMenuItem(
+                  value: 'stopdl',
+                  child: ListTile(
+                    leading: Icon(Icons.stop_circle_outlined),
+                    title: Text('Arrêter les téléchargements'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
               if (context.read<DownloadStore>().supported)
                 const PopupMenuItem(
                   value: 'download',

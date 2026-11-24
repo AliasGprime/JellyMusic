@@ -212,6 +212,24 @@ class DownloadStore extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool _skipCurrent = false;
+
+  /// Annule le téléchargement d'un seul morceau (en attente ou en cours).
+  /// Renvoie faux s'il n'y avait plus rien à annuler (déjà terminé).
+  bool cancelTrack(String trackId) {
+    final before = _queue.length;
+    _queue.removeWhere((j) => j.track.id == trackId);
+    var cancelled = before != _queue.length;
+    total -= before - _queue.length;
+    if (current?.id == trackId) {
+      _skipCurrent = true;
+      total--;
+      cancelled = true;
+    }
+    notifyListeners();
+    return cancelled;
+  }
+
   Future<void> _run() async {
     if (_running) return;
     _running = true;
@@ -220,12 +238,13 @@ class DownloadStore extends ChangeNotifier {
       final job = _queue.removeAt(0);
       current = job.track;
       currentProgress = 0;
+      _skipCurrent = false;
       notifyListeners();
       try {
         await _download(job);
         done++;
       } catch (e) {
-        if (!_cancelled) failed++;
+        if (!_cancelled && !_skipCurrent) failed++;
         debugPrint('Téléchargement échoué (${job.track.name}) : $e');
       }
     }
@@ -261,7 +280,7 @@ class DownloadStore extends ChangeNotifier {
     var received = 0;
     try {
       await for (final chunk in res.stream) {
-        if (_cancelled) throw StateError('Annulé');
+        if (_cancelled || _skipCurrent) throw StateError('Annulé');
         sink.add(chunk);
         received += chunk.length;
         currentProgress = expected == null || expected == 0

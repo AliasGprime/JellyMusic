@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../state/player_controller.dart';
+import 'layout.dart';
 import 'player_screen.dart';
 import 'widgets.dart';
 
@@ -14,6 +15,8 @@ class MiniPlayer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Sur ordinateur, la barre de lecture du bas remplace le mini-lecteur.
+    if (PlayerBarScope.active(context)) return const SizedBox.shrink();
     final pc = context.watch<PlayerController>();
     final t = pc.current;
     if (t == null) {

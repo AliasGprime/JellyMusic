@@ -13,16 +13,26 @@ class PlaylistStore extends ChangeNotifier {
   List<JItem>? playlists;
   Object? error;
 
+  /// Playlists que ce compte a le droit de voir (les playlists Spotify
+  /// « __Compte__ … » des autres comptes sont exclues).
+  Iterable<JItem>? get _mine =>
+      playlists?.where((p) => p.visibleTo(session.username));
+
+  /// Toutes les playlists que ce compte voit (y compris vides ou vidéos).
+  List<JItem>? get mine => _mine?.toList();
+
   /// Playlists affichées : seulement celles qui contiennent au moins un
   /// morceau de musique.
   List<JItem>? get visible =>
-      playlists?.where((p) => (p.musicCount ?? 0) > 0).toList();
+      _mine?.where((p) => (p.musicCount ?? 0) > 0).toList();
 
   /// Playlists proposées dans « Ajouter à une playlist » : celles qui ont de
   /// la musique, plus les playlists entièrement vides (fraîchement créées).
-  /// Une playlist qui ne contient que des vidéos n'est jamais proposée.
-  List<JItem>? get pickable => playlists
-      ?.where((p) => (p.musicCount ?? 0) > 0 || (p.childCount ?? 0) == 0)
+  /// Une playlist qui ne contient que des vidéos n'est jamais proposée, ni
+  /// une playlist Spotify (verrouillée).
+  List<JItem>? get pickable => _mine
+      ?.where((p) => !p.isLocked)
+      .where((p) => (p.musicCount ?? 0) > 0 || (p.childCount ?? 0) == 0)
       .toList();
   bool loading = false;
 
@@ -57,14 +67,48 @@ class PlaylistStore extends ChangeNotifier {
   }
 
   /// Crée une playlist (éventuellement déjà remplie) et renvoie son id.
-  Future<String> create(String name, {List<JItem> tracks = const []}) async {
+  /// [private] : visible seulement par ce compte (préfixe « _-Compte-_ »).
+  Future<String> create(
+    String name, {
+    List<JItem> tracks = const [],
+    bool private = false,
+  }) async {
     final id = await session.client!.createPlaylist(
-      name.trim(),
-      itemIds: tracks.map((t) => t.id).toList(),
+      PlaylistRules.serverName(
+        name,
+        privateFor: private ? session.username : null,
+      ),
     );
-    _changed(id);
-    await refresh();
+    if (tracks.isNotEmpty) {
+      await add(id, tracks); // par paquets : la liste peut être longue
+    } else {
+      _changed(id);
+      await refresh();
+    }
     return id;
+  }
+
+  /// Copie [source] (ex. une playlist Spotify verrouillée) dans une nouvelle
+  /// playlist modifiable nommée [name]. Renvoie l'id de la copie.
+  Future<String> clone(
+    JItem source,
+    String name, {
+    bool private = false,
+  }) async {
+    final tracks = await session.client!.playlistTracks(source.id);
+    return create(name, tracks: tracks, private: private);
+  }
+
+  /// Rend [p] privée (visible seulement par ce compte) ou publique.
+  Future<void> setPrivate(JItem p, bool private) async {
+    await session.client!.renamePlaylist(
+      p.id,
+      PlaylistRules.serverName(
+        p.displayName,
+        privateFor: private ? session.username : null,
+      ),
+    );
+    await refresh();
   }
 
   Future<void> add(String playlistId, List<JItem> tracks) async {
@@ -97,8 +141,12 @@ class PlaylistStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> rename(String playlistId, String name) async {
-    await session.client!.renamePlaylist(playlistId, name.trim());
+  /// Renomme [p] en gardant son statut privé ou public.
+  Future<void> rename(JItem p, String name) async {
+    await session.client!.renamePlaylist(
+      p.id,
+      PlaylistRules.serverName(name, privateFor: p.privateOwner),
+    );
     await refresh();
   }
 

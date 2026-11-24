@@ -1,0 +1,38 @@
+JellyMusic - version web
+========================
+
+INSTALLATION
+1. Décompressez ce fichier .zip.
+2. Copiez TOUT le contenu dans un dossier de votre serveur web, par exemple :
+      /var/www/html/musique/        (Linux / Apache)
+      C:\inetpub\wwwroot\musique\   (Windows / IIS)
+   Le dossier peut avoir n'importe quel nom ; la racine du site fonctionne aussi.
+3. Ouvrez le site dans un navigateur, par exemple : http://votre-site/musique/
+4. L'adresse du serveur Jellyfin est proposée automatiquement (même adresse
+   que le site, port 8096). Corrigez-la si besoin, puis connectez-vous.
+
+ADRESSE DU SERVEUR FIXE (FACULTATIF)
+Pour que la page ne demande plus l'adresse du serveur Jellyfin, créez dans
+le même dossier un fichier « serveur.txt » contenant seulement l'adresse,
+par exemple :
+      http://mon-serveur:8096
+Le fichier « serveur.exemple.txt » explique le format. Les mises à jour ne
+contiennent jamais de serveur.txt : le vôtre ne sera pas écrasé.
+
+AUCUN PHP NI BASE DE DONNÉES N'EST NÉCESSAIRE
+Ce sont uniquement des fichiers statiques (HTML, JavaScript, WebAssembly).
+
+FICHIER .htaccess (APACHE)
+Le fichier caché « .htaccess » fourni règle Apache pour que :
+  - les fichiers .wasm aient le bon type (application/wasm) ;
+  - les navigateurs chargent toujours la dernière version après une mise
+    à jour (plus besoin de Ctrl+F5).
+Copiez-le avec le reste ; il est sans effet sur les autres serveurs web.
+
+MISE À JOUR
+Remplacez tous les fichiers par ceux de la nouvelle version (votre
+serveur.txt n'en fait pas partie et reste en place).
+
+ÉGALISEUR
+Menu ⋮ > Paramètres. Les réglages sont enregistrés sur le compte Jellyfin
+de chaque utilisateur : chacun garde les siens, sur tous ses navigateurs.

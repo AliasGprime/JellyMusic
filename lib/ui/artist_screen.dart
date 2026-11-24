@@ -33,7 +33,7 @@ class ArtistScreen extends StatelessWidget {
             PlayButtons(loadTracks: () => client.artistTracks(artist.id)),
           ],
         ),
-        fetch: (start, limit) =>
+        fetch: (start, limit, _) =>
             client.albums(artistId: artist.id, start: start, limit: limit),
         itemBuilder: (context, items, i) => AlbumCard(album: items[i]),
       ),

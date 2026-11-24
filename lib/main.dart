@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:provider/provider.dart';
 
+import 'state/equalizer_store.dart';
 import 'state/player_controller.dart';
 import 'state/playlist_store.dart';
 import 'state/session.dart';
@@ -36,6 +37,10 @@ class JellyMusicApp extends StatelessWidget {
         ChangeNotifierProvider.value(value: session),
         ChangeNotifierProvider(create: (_) => PlayerController(session)),
         ChangeNotifierProvider(create: (_) => PlaylistStore(session)),
+        ChangeNotifierProvider(
+          create: (_) => EqualizerStore(session),
+          lazy: false, // applique l'égaliseur du compte dès le démarrage
+        ),
       ],
       child: MaterialApp(
         title: 'JellyMusic',

@@ -6,6 +6,7 @@ import '../models.dart';
 import '../state/player_controller.dart';
 import '../state/session.dart';
 import 'album_screen.dart';
+import 'layout.dart';
 import 'playlist_picker.dart';
 
 /// Pochette d'album (ou photo d'artiste) avec une icône de secours.
@@ -106,6 +107,8 @@ class TrackTile extends StatelessWidget {
       subtitle: Text(
         [
           t.artistLine,
+          // Sur ordinateur, il y a la place d'afficher l'album.
+          if (isWide(context) && showCover) t.album ?? '',
           formatDuration(t.duration),
         ].where((s) => s.isNotEmpty).join(' · '),
         maxLines: 1,
@@ -185,15 +188,20 @@ class TrackMenu extends StatelessWidget {
 /// Boutons « Lire » et « Aléatoire » en haut d'une liste de morceaux.
 class PlayButtons extends StatelessWidget {
   final Future<List<JItem>> Function() loadTracks;
-  const PlayButtons({super.key, required this.loadTracks});
+
+  /// Morceaux déjà mélangés pour « Aléatoire » (sinon : [loadTracks]
+  /// mélangés ici).
+  final Future<List<JItem>> Function()? loadShuffled;
+  const PlayButtons({super.key, required this.loadTracks, this.loadShuffled});
 
   Future<void> _play(BuildContext context, bool shuffle) async {
     final player = context.read<PlayerController>();
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final tracks = await loadTracks();
+      final premixed = shuffle && loadShuffled != null;
+      final tracks = await (premixed ? loadShuffled!() : loadTracks());
       if (tracks.isEmpty) return;
-      await player.playItems(tracks, shuffle: shuffle);
+      await player.playItems(tracks, shuffle: shuffle && !premixed);
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
@@ -228,12 +236,20 @@ class PlayButtons extends StatelessWidget {
 
 /// Liste qui charge la bibliothèque par pages au fil du défilement.
 class PagedItems extends StatefulWidget {
-  final Future<ItemsPage> Function(int start, int limit) fetch;
+  /// Charge une page ; [letter] est la lettre choisie dans la barre A-Z
+  /// (null : tout).
+  final Future<ItemsPage> Function(int start, int limit, String? letter) fetch;
   final Widget Function(BuildContext context, List<JItem> items, int index)
   itemBuilder;
   final bool grid;
   final Widget? header;
+
+  /// En-tête qui dépend de la lettre choisie (prioritaire sur [header]).
+  final Widget Function(String? letter)? headerFor;
   final String emptyText;
+
+  /// Affiche la barre de lettres # A … Z à droite pour filtrer la liste.
+  final bool alphabet;
 
   const PagedItems({
     super.key,
@@ -241,7 +257,9 @@ class PagedItems extends StatefulWidget {
     required this.itemBuilder,
     this.grid = false,
     this.header,
+    this.headerFor,
     this.emptyText = 'Rien ici pour l\'instant.',
+    this.alphabet = false,
   });
 
   @override
@@ -267,42 +285,95 @@ class _PagedItemsState extends State<PagedItems>
 
   bool get _hasMore => _total < 0 || _items.length < _total;
 
+  /// Lettre choisie dans la barre A-Z (null : tout).
+  String? _letter;
+
+  /// Augmente à chaque nouveau filtre : une réponse arrivée trop tard (pour
+  /// l'ancienne lettre) est ignorée.
+  int _generation = 0;
+
+  final _scroll = ScrollController();
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadMore() async {
     if (_loading || !_hasMore) return;
+    final gen = _generation;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final page = await widget.fetch(_items.length, _pageSize);
-      if (!mounted) return;
+      final page = await widget.fetch(_items.length, _pageSize, _letter);
+      if (!mounted || gen != _generation) return;
       setState(() {
         _items.addAll(page.items);
         _total = page.items.isEmpty ? _items.length : page.total;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = e);
+      if (mounted && gen == _generation) setState(() => _error = e);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && gen == _generation) setState(() => _loading = false);
     }
   }
 
   Future<void> _refresh() async {
     setState(() {
+      _generation++;
+      _loading = false;
       _items.clear();
       _total = -1;
     });
     await _loadMore();
   }
 
+  /// Choisit une lettre ; la même lettre une 2e fois : retour à tout.
+  void _pickLetter(String letter) {
+    _letter = _letter == letter ? null : letter;
+    if (_scroll.hasClients) _scroll.jumpTo(0);
+    _refresh();
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final list = _buildList(context);
+    if (!widget.alphabet) return list;
+    return Row(
+      children: [
+        Expanded(child: list),
+        LetterBar(selected: _letter, onPick: _pickLetter),
+      ],
+    );
+  }
+
+  Widget _buildList(BuildContext context) {
     if (_items.isEmpty) {
       if (_error != null) return ErrorRetry(error: _error!, onRetry: _refresh);
       if (_loading) return const Center(child: CircularProgressIndicator());
-      return Center(child: Text(widget.emptyText));
+      final header = widget.headerFor?.call(_letter);
+      return Column(
+        children: [
+          ?header,
+          Expanded(
+            child: Center(
+              child: Text(
+                _letter == null
+                    ? widget.emptyText
+                    : _letter == '#'
+                    ? 'Rien qui commence par un chiffre ou un symbole.'
+                    : 'Rien qui commence par « $_letter ».',
+              ),
+            ),
+          ),
+        ],
+      );
     }
+    final header = widget.headerFor?.call(_letter) ?? widget.header;
     final footer = _hasMore
         ? const Padding(
             padding: EdgeInsets.all(16),
@@ -318,9 +389,10 @@ class _PagedItemsState extends State<PagedItems>
       child: RefreshIndicator(
         onRefresh: _refresh,
         child: CustomScrollView(
+          controller: _scroll,
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            if (widget.header != null) SliverToBoxAdapter(child: widget.header),
+            if (header != null) SliverToBoxAdapter(child: header),
             if (widget.grid)
               SliverPadding(
                 padding: const EdgeInsets.all(12),
@@ -345,6 +417,79 @@ class _PagedItemsState extends State<PagedItems>
                 ),
               ),
             SliverToBoxAdapter(child: footer),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+const _letters = [
+  '#',
+  'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', //
+  'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+];
+
+/// Barre verticale # A … Z : un clic filtre la liste sur cette lettre, un
+/// 2e clic sur la même lettre réaffiche tout.
+class LetterBar extends StatelessWidget {
+  final String? selected;
+  final ValueChanged<String> onPick;
+  const LetterBar({super.key, required this.selected, required this.onPick});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return SizedBox(
+      width: 30,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Column(
+          children: [
+            for (final l in _letters)
+              Expanded(
+                child: Tooltip(
+                  message: l == selected
+                      ? 'Tout afficher'
+                      : l == '#'
+                      ? 'Chiffres et symboles'
+                      : 'Commence par $l',
+                  waitDuration: const Duration(milliseconds: 600),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => onPick(l),
+                    child: Center(
+                      child: Container(
+                        width: 24,
+                        constraints: const BoxConstraints(maxHeight: 24),
+                        decoration: l == selected
+                            ? BoxDecoration(
+                                color: scheme.primary,
+                                shape: BoxShape.circle,
+                              )
+                            : null,
+                        alignment: Alignment.center,
+                        child: FittedBox(
+                          child: Text(
+                            l,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: l == selected
+                                  ? scheme.onPrimary
+                                  : selected == null
+                                  ? scheme.onSurfaceVariant
+                                  : scheme.onSurfaceVariant.withValues(
+                                      alpha: 0.6,
+                                    ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

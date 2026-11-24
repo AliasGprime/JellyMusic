@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jellymusic/api/jellyfin_client.dart';
 import 'package:jellymusic/models.dart';
+import 'package:jellymusic/state/equalizer_store.dart';
+import 'package:jellymusic/state/player_controller.dart';
+import 'package:jellymusic/state/session.dart';
 import 'package:jellymusic/update/update_dialog.dart';
 import 'package:jellymusic/update/updater.dart';
 
@@ -13,11 +16,96 @@ void main() {
     expect(compareVersions('1.0', '1.0.0'), 0);
   });
 
+  test('lit le fichier serveur.txt', () {
+    expect(
+      Session.parseServerFile('http://mon-serveur:8096/\n'),
+      'http://mon-serveur:8096',
+    );
+    expect(
+      Session.parseServerFile('# commentaire\n\n  https://x.ca  \nautre'),
+      'https://x.ca',
+    );
+    expect(Session.parseServerFile('# seulement des commentaires\n'), isNull);
+    expect(Session.parseServerFile(''), isNull);
+    expect(Session.parseServerFile('<html>Not Found</html>'), isNull);
+  });
+
+  test('lit les réglages de l\'égaliseur', () {
+    final s = EqSettings.fromJson(
+      '{"enabled":true,"preamp":-3,"gains":[20,-20,1],"preset":"Rock"}',
+    );
+    expect(s.enabled, isTrue);
+    expect(s.preamp, -3);
+    expect(s.gains.length, 10); // bandes manquantes complétées
+    expect(s.gains[0], eqMaxDb); // valeurs bornées à ±12 dB
+    expect(s.gains[1], eqMinDb);
+    expect(s.preset, 'Rock');
+    expect(eqPresets.values.every((g) => g.length == 10), isTrue);
+  });
+
+  test(
+    'aléatoire : « Lire ensuite » passe juste après le morceau en cours',
+    () {
+      final o = QueueShuffleOrder()..indices.addAll([3, 0, 2, 1]);
+      // En cours : morceau 0 (2e dans l'ordre). Insertion à l'index 1.
+      o.insertAfter = 0;
+      o.insert(1, 1);
+      expect(o.indices, [4, 0, 1, 3, 2]);
+      // « Ajouter à la file » : à la fin.
+      o.insert(5, 1);
+      expect(o.indices, [4, 0, 1, 3, 2, 5]);
+    },
+  );
+
   test('nettoie les notes de version Markdown', () {
     expect(
       plainNotes('**Fonctions**\n- Lecture `rapide`\n## Titre'),
       'Fonctions\n• Lecture rapide\nTitre',
     );
+  });
+
+  test('playlists Spotify « __Compte__ Nom »', () {
+    JItem pl(String name) =>
+        JItem.fromJson({'Id': 'p', 'Name': name, 'Type': 'Playlist'});
+    final s = pl('__Alice__ Divers');
+    expect(s.spotifyOwner, 'Alice');
+    expect(s.displayName, 'Divers (Spotify)');
+    expect(s.isLocked, isTrue);
+    expect(s.visibleTo('alice'), isTrue); // sans tenir compte des majuscules
+    expect(s.visibleTo('Bob'), isFalse);
+    final n = pl('Ma playlist');
+    expect(n.isLocked, isFalse);
+    expect(n.displayName, 'Ma playlist');
+    expect(n.visibleTo('Bob'), isTrue);
+  });
+
+  test('playlists privées « _-Compte-_ Nom »', () {
+    JItem pl(String name) =>
+        JItem.fromJson({'Id': 'p', 'Name': name, 'Type': 'Playlist'});
+    expect(
+      PlaylistRules.serverName('Rock', privateFor: 'Alice'),
+      '_-Alice-_ Rock',
+    );
+    expect(PlaylistRules.serverName(' Rock '), 'Rock');
+    final r = pl('_-Alice-_ Rock');
+    expect(r.privateOwner, 'Alice');
+    expect(r.isPrivate, isTrue);
+    expect(r.isLocked, isFalse);
+    expect(r.displayName, 'Rock');
+    expect(r.visibleTo('Alice'), isTrue);
+    expect(r.visibleTo('Bob'), isFalse);
+    // Une playlist Spotify n'est jamais prise pour une privée, et inversement.
+    expect(pl('__Alice__ Divers').isPrivate, isFalse);
+    expect(r.isSpotify, isFalse);
+    expect(pl('__Alice__ Divers').baseName, 'Divers');
+  });
+
+  test('lettre de rangement d\'un titre', () {
+    expect(JellyfinClient.letterOf('Makeba'), 'M');
+    expect(JellyfinClient.letterOf('été indien'), 'E');
+    expect(JellyfinClient.letterOf('(Don\'t Fear) The Reaper'), 'D');
+    expect(JellyfinClient.letterOf('99 Red Balloons'), '#');
+    expect(JellyfinClient.letterOf('…'), '#');
   });
 
   test('normalise l\'adresse du serveur', () {

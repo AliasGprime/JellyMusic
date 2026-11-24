@@ -44,10 +44,81 @@ Future<String?> askPlaylistName(
   );
 }
 
+/// Nom d'une nouvelle playlist et son statut (privée ou publique).
+typedef NewPlaylist = ({String name, bool private});
+
+/// Demande le nom d'une nouvelle playlist, avec la case « Privée » (cochée
+/// par défaut).
+Future<NewPlaylist?> askNewPlaylist(
+  BuildContext context, {
+  String title = 'Nouvelle playlist',
+  String action = 'Créer',
+  String initial = '',
+  bool private = true,
+}) {
+  final ctrl = TextEditingController(text: initial);
+  var isPrivate = private;
+  return showDialog<NewPlaylist>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, setState) {
+        void submit() {
+          final v = ctrl.text.trim();
+          if (v.isNotEmpty) {
+            Navigator.of(context).pop((name: v, private: isPrivate));
+          }
+        }
+
+        return AlertDialog(
+          title: Text(title),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: const InputDecoration(
+                  labelText: 'Nom de la playlist',
+                ),
+                onSubmitted: (_) => submit(),
+              ),
+              const SizedBox(height: 8),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: isPrivate,
+                onChanged: (v) => setState(() => isPrivate = v ?? true),
+                title: const Text('Privée'),
+                subtitle: Text(
+                  isPrivate
+                      ? 'Visible seulement par votre compte.'
+                      : 'Visible par tous les comptes.',
+                ),
+                secondary: Icon(
+                  isPrivate ? Icons.person_outline : Icons.group_outlined,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(onPressed: submit, child: Text(action)),
+          ],
+        );
+      },
+    ),
+  );
+}
+
 String _normalize(String s) => s.trim().toLowerCase();
 
-/// Cherche une playlist portant déjà ce nom (casse ignorée), y compris les
-/// playlists cachées dans l'application (vides ou ne contenant que des vidéos).
+/// Cherche, parmi les playlists que ce compte voit, une playlist portant déjà
+/// ce nom (casse ignorée), y compris celles cachées dans l'application (vides
+/// ou ne contenant que des vidéos). Les playlists privées des autres comptes
+/// ne comptent pas : chacun peut avoir sa « Rock ».
 Future<JItem?> findPlaylistByName(
   PlaylistStore store,
   String name, {
@@ -55,8 +126,8 @@ Future<JItem?> findPlaylistByName(
 }) async {
   await store.refresh(); // liste fraîche : quelqu'un a pu en créer ailleurs
   final n = _normalize(name);
-  return store.playlists
-      ?.where((p) => p.id != excludeId && _normalize(p.name) == n)
+  return store.mine
+      ?.where((p) => p.id != excludeId && _normalize(p.displayName) == n)
       .firstOrNull;
 }
 
@@ -88,11 +159,17 @@ Future<String?> createPlaylistFlow(
   final store = context.read<PlaylistStore>();
   final messenger = ScaffoldMessenger.of(context);
   var initial = '';
+  var private = true;
   String name;
   while (true) {
-    final asked = await askPlaylistName(context, initial: initial);
+    final asked = await askNewPlaylist(
+      context,
+      initial: initial,
+      private: private,
+    );
     if (asked == null || !context.mounted) return null;
-    name = asked;
+    name = asked.name;
+    private = asked.private;
 
     final JItem? existing;
     try {
@@ -106,7 +183,7 @@ Future<String?> createPlaylistFlow(
     final choice = await showDialog<_DuplicateChoice>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('« ${existing!.name} » existe déjà'),
+        title: Text('« ${existing!.displayName} » existe déjà'),
         content: Text(
           '${describeExisting(existing)}\n\n'
           'Créer une nouvelle playlist donnerait deux playlists portant le '
@@ -148,7 +225,7 @@ Future<String?> createPlaylistFlow(
         messenger.showSnackBar(
           SnackBar(
             content: Text(
-              '${_countLabel(tracks.length)} ajouté(s) à « ${existing.name} »',
+              '${_countLabel(tracks.length)} ajouté(s) à « ${existing.displayName} »',
             ),
           ),
         );
@@ -163,7 +240,7 @@ Future<String?> createPlaylistFlow(
   }
 
   try {
-    final id = await store.create(name, tracks: tracks);
+    final id = await store.create(name, tracks: tracks, private: private);
     messenger.showSnackBar(
       SnackBar(
         content: Text(
@@ -219,11 +296,38 @@ Future<void> showAddToPlaylist(
     await store.add(p.id, list);
     messenger.showSnackBar(
       SnackBar(
-        content: Text('${_countLabel(list.length)} ajouté(s) à « ${p.name} »'),
+        content: Text(
+          '${_countLabel(list.length)} ajouté(s) à « ${p.displayName} »',
+        ),
       ),
     );
   } catch (e) {
     messenger.showSnackBar(SnackBar(content: Text('Ajout impossible : $e')));
+  }
+}
+
+/// Petit symbole à droite d'une playlist : cadenas pour une playlist Spotify
+/// verrouillée, silhouette pour une playlist privée, rien si publique.
+class PlaylistBadge extends StatelessWidget {
+  final JItem playlist;
+  const PlaylistBadge({super.key, required this.playlist});
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, tip) = playlist.isLocked
+        ? (Icons.lock_outline, 'Playlist Spotify verrouillée')
+        : playlist.isPrivate
+        ? (Icons.person_outline, 'Privée : visible seulement par vous')
+        : (null, '');
+    if (icon == null) return const SizedBox.shrink();
+    return Tooltip(
+      message: tip,
+      child: Icon(
+        icon,
+        size: 18,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
   }
 }
 
@@ -280,10 +384,11 @@ class _PickerSheet extends StatelessWidget {
                 itemId: p.imageItemId,
                 fallback: Icons.queue_music,
               ),
-              title: Text(p.name),
+              title: Text(p.displayName),
               subtitle: p.musicCount != null
                   ? Text(_countLabel(p.musicCount!))
                   : null,
+              trailing: PlaylistBadge(playlist: p),
               onTap: () => Navigator.of(context).pop(_Choice(p)),
             ),
         ],

@@ -1,0 +1,15 @@
+# Adresse fixe du serveur Jellyfin pour JellyMusic (version web)
+#
+# Pour l'utiliser : copiez ce fichier sous le nom « serveur.txt » dans le
+# même dossier, puis écrivez l'adresse de votre serveur sur une ligne qui
+# ne commence pas par #. Exemple :
+#
+#   http://mon-serveur:8096
+#
+# Quand serveur.txt contient une adresse, l'écran de connexion ne demande
+# plus l'adresse du serveur et utilise directement celle-ci.
+# Sans serveur.txt (ou s'il ne contient que des lignes #), l'adresse est
+# demandée comme d'habitude.
+#
+# Les mises à jour de JellyMusic ne contiennent jamais de serveur.txt :
+# le vôtre n'est donc pas écrasé.

@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:http/http.dart' as http;
 
 import '../models.dart';
@@ -15,7 +17,7 @@ class JellyfinException implements Exception {
 class JellyfinClient {
   static const clientName = 'JellyMusic';
   static const clientVersion = '1.0.0';
-  static const deviceName = 'Android';
+  static String get deviceName => kIsWeb ? 'Navigateur web' : 'Android';
 
   final String baseUrl;
   final String deviceId;
@@ -66,6 +68,14 @@ class JellyfinClient {
   }
 
   Future<dynamic> _get(String path, [Map<String, String>? query]) async {
+    // Listes d'éléments : demander aussi la correction de volume (dB).
+    if (query != null && path.endsWith('/Items')) {
+      final f = query['Fields'];
+      query = {
+        ...query,
+        'Fields': f == null ? 'NormalizationGain' : '$f,NormalizationGain',
+      };
+    }
     final res = await _http
         .get(_uri(path, query), headers: _headers)
         .timeout(const Duration(seconds: 20));
@@ -143,12 +153,25 @@ class JellyfinClient {
     if (limit != null) 'Limit': '$limit',
   };
 
-  Future<ItemsPage> artists({int start = 0, int? limit}) async => _page(
+  /// Filtre par première lettre : « A » à « Z », ou « # » pour tout ce qui
+  /// commence par un chiffre ou un symbole (avant « A »).
+  static Map<String, String> _letterFilter(String? letter) => switch (letter) {
+    null => const {},
+    '#' => const {'NameLessThan': 'A'},
+    _ => {'NameStartsWith': letter},
+  };
+
+  Future<ItemsPage> artists({
+    int start = 0,
+    int? limit,
+    String? letter,
+  }) async => _page(
     await _get('/Artists/AlbumArtists', {
       'userId': userId!,
       'SortBy': 'SortName',
       'SortOrder': 'Ascending',
       'EnableImageTypes': 'Primary',
+      ..._letterFilter(letter),
       ..._paging(start, limit),
     }),
   );
@@ -157,6 +180,7 @@ class JellyfinClient {
     String? artistId,
     int start = 0,
     int? limit,
+    String? letter,
   }) async => _page(
     await _get('/Items', {
       'userId': userId!,
@@ -166,20 +190,85 @@ class JellyfinClient {
       'SortOrder': artistId != null ? 'Descending,Ascending' : 'Ascending',
       if (artistId != null) 'AlbumArtistIds': artistId,
       'Fields': 'ChildCount',
+      ..._letterFilter(letter),
       ..._paging(start, limit),
     }),
   );
 
-  Future<ItemsPage> songs({int start = 0, int? limit}) async => _page(
-    await _get('/Items', {
-      'userId': userId!,
-      'IncludeItemTypes': 'Audio',
-      'Recursive': 'true',
-      'SortBy': 'SortName',
-      'SortOrder': 'Ascending',
-      ..._paging(start, limit),
-    }),
-  );
+  Future<ItemsPage> songs({
+    int start = 0,
+    int? limit,
+    String? letter,
+    bool random = false,
+  }) async {
+    if (letter != null) {
+      // Pour les morceaux, le filtre par lettre de Jellyfin ne marche pas
+      // (il compare un nom de tri qui commence souvent par le n° de piste) :
+      // on filtre ici sur le titre.
+      final all = (await _songsSnapshot())
+          .where((s) => letterOf(s.name) == letter)
+          .toList();
+      if (random) all.shuffle();
+      final end = limit == null ? all.length : (start + limit);
+      return ItemsPage(
+        all.sublist(start.clamp(0, all.length), end.clamp(0, all.length)),
+        all.length,
+      );
+    }
+    return _page(
+      await _get('/Items', {
+        'userId': userId!,
+        'IncludeItemTypes': 'Audio',
+        'Recursive': 'true',
+        'SortBy': random ? 'Random' : 'SortName',
+        'SortOrder': 'Ascending',
+        ..._paging(start, limit),
+      }),
+    );
+  }
+
+  /// Lettre de rangement d'un titre : première lettre (sans accent) ou
+  /// chiffre ; « # » pour un chiffre ou un titre sans lettre.
+  static String letterOf(String name) {
+    const accents = {
+      'À': 'A', 'Â': 'A', 'Ä': 'A', 'Á': 'A', 'Ã': 'A', 'Å': 'A', //
+      'Ç': 'C', 'É': 'E', 'È': 'E', 'Ê': 'E', 'Ë': 'E', 'Í': 'I', //
+      'Ì': 'I', 'Î': 'I', 'Ï': 'I', 'Ñ': 'N', 'Ó': 'O', 'Ò': 'O', //
+      'Ô': 'O', 'Ö': 'O', 'Õ': 'O', 'Ú': 'U', 'Ù': 'U', 'Û': 'U', //
+      'Ü': 'U', 'Ý': 'Y', 'Ÿ': 'Y',
+    };
+    for (final ch in name.toUpperCase().split('')) {
+      final c = accents[ch] ?? ch;
+      if (RegExp(r'[A-Z]').hasMatch(c)) return c;
+      if (RegExp(r'[0-9]').hasMatch(c)) return '#';
+    }
+    return '#';
+  }
+
+  /// Tous les morceaux (triés par titre), gardés 5 minutes en mémoire pour
+  /// filtrer rapidement par lettre.
+  Future<List<JItem>>? _songsCache;
+  DateTime _songsCacheTime = DateTime(2000);
+
+  Future<List<JItem>> _songsSnapshot() {
+    final fresh =
+        DateTime.now().difference(_songsCacheTime) < const Duration(minutes: 5);
+    if (_songsCache != null && fresh) return _songsCache!;
+    _songsCacheTime = DateTime.now();
+    return _songsCache =
+        () async {
+          final all = <JItem>[];
+          while (true) {
+            final page = await songs(start: all.length, limit: 1000);
+            all.addAll(page.items);
+            if (page.items.isEmpty || all.length >= page.total) break;
+          }
+          return all;
+        }().catchError((Object e) {
+          _songsCache = null; // nouvel essai au prochain appel
+          throw e;
+        });
+  }
 
   /// Sélection aléatoire de morceaux dans toute la bibliothèque.
   Future<List<JItem>> randomSongs({int limit = 200}) async => _page(
@@ -312,6 +401,41 @@ class JellyfinClient {
   Future<void> deletePlaylist(String playlistId) =>
       _send('DELETE', '/Items/$playlistId');
 
+  // ---- Réglages de l'application, propres à chaque compte ----
+  // Rangés dans les « préférences d'affichage » de l'utilisateur sur le
+  // serveur Jellyfin (champ CustomPrefs), sous l'identifiant « jellymusic ».
+
+  static const _prefsId = 'jellymusic';
+
+  Map<String, String> get _prefsQuery => {
+    'userId': userId!,
+    'client': clientName,
+  };
+
+  Future<Map<String, dynamic>> _displayPrefs() async =>
+      (await _get('/DisplayPreferences/$_prefsId', _prefsQuery))
+          as Map<String, dynamic>;
+
+  Future<String?> getUserSetting(String key) async {
+    final custom = (await _displayPrefs())['CustomPrefs'];
+    return custom is Map ? custom[key] as String? : null;
+  }
+
+  Future<void> setUserSetting(String key, String value) async {
+    final prefs = await _displayPrefs();
+    final custom = Map<String, dynamic>.from(
+      (prefs['CustomPrefs'] as Map?) ?? const {},
+    );
+    custom[key] = value;
+    prefs['CustomPrefs'] = custom;
+    await _send(
+      'POST',
+      '/DisplayPreferences/$_prefsId',
+      query: _prefsQuery,
+      body: prefs,
+    );
+  }
+
   Future<List<JItem>> search(String term) async => _page(
     await _get('/Items', {
       'userId': userId!,
@@ -339,10 +463,19 @@ class JellyfinClient {
 
   /// URL de diffusion : le serveur envoie le fichier original si le téléphone
   /// sait le lire, sinon il le convertit en MP3.
-  String streamUrl(String itemId) => _uri('/Audio/$itemId/universal', {
+  /// Adresse du flux audio. [maxKbps] : débit maximal en kb/s ; au-delà,
+  /// Jellyfin convertit en MP3 à ce débit. null : fichier original, sans
+  /// conversion (ex. FLAC sans perte).
+  String streamUrl(
+    String itemId, {
+    int? maxKbps = 320,
+  }) => _uri('/Audio/$itemId/universal', {
     'UserId': userId!,
     'DeviceId': deviceId,
-    'MaxStreamingBitrate': '320000',
+    // Le navigateur ne peut pas ajouter d'en-tête au flux audio : sur le
+    // web, le jeton passe donc dans l'adresse (paramètre ApiKey).
+    if (kIsWeb) 'ApiKey': token!,
+    'MaxStreamingBitrate': maxKbps == null ? '200000000' : '${maxKbps * 1000}',
     'Container':
         'opus,webm|opus,mp3,aac,m4a|aac,m4b|aac,flac,webma,webm|webma,wav,ogg',
     'TranscodingContainer': 'mp3',

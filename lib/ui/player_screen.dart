@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:provider/provider.dart';
@@ -5,10 +6,11 @@ import 'package:provider/provider.dart';
 import '../models.dart';
 import '../state/player_controller.dart';
 import 'album_screen.dart';
+import 'layout.dart';
 import 'playlist_picker.dart';
 import 'widgets.dart';
 
-/// Lecteur plein écran.
+/// Lecteur plein écran (une colonne sur téléphone, deux sur ordinateur).
 class PlayerScreen extends StatelessWidget {
   const PlayerScreen({super.key});
 
@@ -27,7 +29,6 @@ class PlayerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final pc = context.watch<PlayerController>();
     final t = pc.current;
-    final player = pc.player;
     final theme = Theme.of(context);
 
     if (t == null) {
@@ -37,9 +38,71 @@ class PlayerScreen extends StatelessWidget {
       return const Scaffold();
     }
 
+    void openAlbum() {
+      if (t.albumId == null) return;
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) =>
+              AlbumScreen(albumId: t.albumId!, title: t.album ?? ''),
+        ),
+      );
+    }
+
+    Widget cover(double size) => GestureDetector(
+      onTap: openAlbum,
+      child: Hero(
+        tag: 'cover',
+        child: CoverImage(
+          itemId: t.imageItemId,
+          size: size,
+          radius: 16,
+          maxWidth: 900,
+        ),
+      ),
+    );
+
+    final info = <Widget>[
+      Text(
+        t.name,
+        maxLines: 2,
+        textAlign: TextAlign.center,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.headlineSmall,
+      ),
+      const SizedBox(height: 4),
+      Text(
+        t.artistLine,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.titleMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      if (pc.lastError != null)
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Text(
+            pc.lastError!,
+            style: TextStyle(color: theme.colorScheme.error),
+          ),
+        ),
+      const SizedBox(height: 16),
+      SeekBar(player: pc.player, fallback: t.duration),
+      const SizedBox(height: 8),
+      PlayerControls(pc: pc),
+      const SizedBox(height: 4),
+      _SeekAndLoopControls(pc: pc),
+      const SizedBox(height: 8),
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: VolumeControl(pc: pc),
+      ),
+    ];
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
+          tooltip: 'Fermer',
           icon: const Icon(Icons.keyboard_arrow_down),
           onPressed: () => Navigator.of(context).pop(),
         ),
@@ -54,70 +117,52 @@ class PlayerScreen extends StatelessWidget {
           IconButton(
             tooltip: 'File d\'attente',
             icon: const Icon(Icons.queue_music),
-            onPressed: () => _showQueue(context),
+            onPressed: () => showQueueSheet(context),
           ),
         ],
       ),
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, c) {
-            final coverSize = (c.maxWidth - 48).clamp(120.0, c.maxHeight * 0.5);
+            if (c.maxWidth >= wideBreakpoint) {
+              // Ordinateur : pochette à gauche, informations à droite.
+              // Pochette limitée par la hauteur ET par la largeur restante
+              // (colonne d'informations 460 + marges), sinon ça déborde.
+              final size = [
+                c.maxHeight - 64,
+                c.maxWidth - 460 - 48 - 64,
+                560.0,
+              ].reduce((x, y) => x < y ? x : y).clamp(160.0, 560.0);
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      cover(size),
+                      const SizedBox(width: 48),
+                      SizedBox(
+                        width: 460,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: info,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }
+            final size = (c.maxWidth - 48).clamp(120.0, c.maxHeight * 0.45);
             return Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Column(
                 children: [
                   const Spacer(),
-                  GestureDetector(
-                    onTap: t.albumId == null
-                        ? null
-                        : () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => AlbumScreen(
-                                albumId: t.albumId!,
-                                title: t.album ?? '',
-                              ),
-                            ),
-                          ),
-                    child: Hero(
-                      tag: 'cover',
-                      child: CoverImage(
-                        itemId: t.imageItemId,
-                        size: coverSize,
-                        radius: 16,
-                        maxWidth: 900,
-                      ),
-                    ),
-                  ),
+                  cover(size),
                   const Spacer(),
-                  Text(
-                    t.name,
-                    maxLines: 2,
-                    textAlign: TextAlign.center,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    t.artistLine,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  if (pc.lastError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        pc.lastError!,
-                        style: TextStyle(color: theme.colorScheme.error),
-                      ),
-                    ),
-                  const SizedBox(height: 16),
-                  _SeekBar(player: player, fallback: t.duration),
-                  const SizedBox(height: 8),
-                  _Controls(pc: pc),
-                  const SizedBox(height: 32),
+                  ...info,
+                  const SizedBox(height: 24),
                 ],
               ),
             );
@@ -126,32 +171,173 @@ class PlayerScreen extends StatelessWidget {
       ),
     );
   }
+}
 
-  void _showQueue(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      showDragHandle: true,
-      builder: (_) => const _QueueSheet(),
+/// Reculer / avancer de 10 s et boucle A-B (lecteur plein écran).
+class _SeekAndLoopControls extends StatelessWidget {
+  final PlayerController pc;
+  const _SeekAndLoopControls({required this.pc});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final a = pc.abStart, b = pc.abEnd;
+
+    final String label;
+    final String tooltip;
+    final Widget abButton;
+    if (a == null) {
+      label = 'A-B';
+      tooltip = 'Boucle A-B : appuyez pour marquer le début (A)';
+      abButton = OutlinedButton(onPressed: pc.pressAb, child: Text(label));
+    } else if (b == null) {
+      label = 'A-…';
+      tooltip = 'Appuyez pour marquer la fin (B) et lancer la boucle';
+      abButton = FilledButton.tonal(onPressed: pc.pressAb, child: Text(label));
+    } else {
+      label = 'A-B';
+      tooltip = 'Boucle active : appuyez pour l\'arrêter';
+      abButton = FilledButton(onPressed: pc.pressAb, child: Text(label));
+    }
+
+    final status = a == null
+        ? null
+        : b == null
+        ? 'A : ${formatDuration(a)} — appuyez à nouveau pour B'
+        : 'Boucle ${formatDuration(a)} → ${formatDuration(b)}';
+
+    return Column(
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            IconButton(
+              tooltip: 'Reculer de 10 secondes',
+              iconSize: 30,
+              icon: const Icon(Icons.replay_10),
+              onPressed: () => pc.seekBy(-10),
+            ),
+            const SizedBox(width: 16),
+            Tooltip(
+              message: tooltip,
+              child: SizedBox(width: 84, child: abButton),
+            ),
+            const SizedBox(width: 16),
+            IconButton(
+              tooltip: 'Avancer de 10 secondes',
+              iconSize: 30,
+              icon: const Icon(Icons.forward_10),
+              onPressed: () => pc.seekBy(10),
+            ),
+          ],
+        ),
+        SizedBox(
+          height: 20,
+          child: status == null
+              ? null
+              : Text(
+                  status,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: b == null ? scheme.onSurfaceVariant : scheme.primary,
+                  ),
+                ),
+        ),
+      ],
     );
   }
 }
 
-class _SeekBar extends StatefulWidget {
-  final AudioPlayer player;
-  final Duration? fallback;
-  const _SeekBar({required this.player, this.fallback});
-
-  @override
-  State<_SeekBar> createState() => _SeekBarState();
+void showQueueSheet(BuildContext context) {
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    showDragHandle: true,
+    constraints: const BoxConstraints(maxWidth: 640),
+    builder: (_) => const _QueueSheet(),
+  );
 }
 
-class _SeekBarState extends State<_SeekBar> {
-  double? _dragValue;
+/// Barre de progression du morceau. [compact] : version pour la barre de
+/// lecture « ordinateur », avec les temps de part et d'autre.
+/// Molette de la souris au-dessus de [child] : [onStep] reçoit +1 (vers le
+/// haut) ou -1 (vers le bas). La page derrière ne défile pas.
+class MouseWheel extends StatefulWidget {
+  final Widget child;
+  final void Function(int direction) onStep;
+  const MouseWheel({super.key, required this.child, required this.onStep});
+
+  @override
+  State<MouseWheel> createState() => _MouseWheelState();
+}
+
+class _MouseWheelState extends State<MouseWheel> {
+  // Un cran de molette ≈ 100 px ; un pavé tactile envoie plein de petits
+  // déplacements, qu'on cumule pour ne pas sauter trop vite.
+  static const _threshold = 50.0;
+  double _acc = 0;
+
+  void _onScroll(double dy) {
+    if (_acc != 0 && dy.sign != _acc.sign) _acc = 0;
+    _acc += dy;
+    if (_acc.abs() < _threshold) return;
+    widget.onStep(_acc < 0 ? 1 : -1);
+    _acc = 0;
+  }
 
   @override
   Widget build(BuildContext context) {
+    return Listener(
+      onPointerSignal: (event) {
+        if (event is! PointerScrollEvent) return;
+        final dy = event.scrollDelta.dy;
+        if (dy == 0) return;
+        GestureBinding.instance.pointerSignalResolver.register(
+          event,
+          (_) => _onScroll(dy),
+        );
+      },
+      child: widget.child,
+    );
+  }
+}
+
+class SeekBar extends StatefulWidget {
+  final AudioPlayer player;
+  final Duration? fallback;
+  final bool compact;
+  const SeekBar({
+    super.key,
+    required this.player,
+    this.fallback,
+    this.compact = false,
+  });
+
+  @override
+  State<SeekBar> createState() => _SeekBarState();
+}
+
+class _SeekBarState extends State<SeekBar> {
+  double? _dragValue;
+
+  /// Molette : avance ou recule de 10 secondes.
+  void _wheel(int direction) {
+    final player = widget.player;
+    final dur = player.duration ?? widget.fallback;
+    if (dur == null || dur == Duration.zero) return;
+    var to = player.position + Duration(seconds: 10 * direction);
+    if (to < Duration.zero) to = Duration.zero;
+    if (to > dur) to = dur;
+    player.seek(to);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseWheel(onStep: _wheel, child: _buildBar(context));
+  }
+
+  Widget _buildBar(BuildContext context) {
     final player = widget.player;
     return StreamBuilder<Duration>(
       stream: player.positionStream,
@@ -160,25 +346,51 @@ class _SeekBarState extends State<_SeekBar> {
         final max = dur.inMilliseconds.toDouble();
         final pos = (snap.data ?? Duration.zero).inMilliseconds.toDouble();
         final value = (_dragValue ?? pos).clamp(0.0, max > 0 ? max : 1.0);
+        // Partie déjà téléchargée (mise en mémoire tampon), affichée en
+        // plus clair devant la position de lecture.
+        final buffered = player.bufferedPosition.inMilliseconds
+            .toDouble()
+            .clamp(0.0, max > 0 ? max : 1.0);
+        final scheme = Theme.of(context).colorScheme;
+        final slider = Slider(
+          value: value,
+          max: max > 0 ? max : 1.0,
+          secondaryTrackValue: buffered,
+          secondaryActiveColor: scheme.primary.withValues(alpha: 0.45),
+          onChanged: max > 0 ? (v) => setState(() => _dragValue = v) : null,
+          onChangeEnd: (v) {
+            player.seek(Duration(milliseconds: v.round()));
+            setState(() => _dragValue = null);
+          },
+        );
+        final posText = Text(
+          formatDuration(Duration(milliseconds: value.round())),
+          style: Theme.of(context).textTheme.bodySmall,
+        );
+        final durText = Text(
+          formatDuration(dur),
+          style: Theme.of(context).textTheme.bodySmall,
+        );
+        if (widget.compact) {
+          return Row(
+            children: [
+              SizedBox(
+                width: 44,
+                child: Align(alignment: Alignment.centerRight, child: posText),
+              ),
+              Expanded(child: slider),
+              SizedBox(width: 44, child: durText),
+            ],
+          );
+        }
         return Column(
           children: [
-            Slider(
-              value: value,
-              max: max > 0 ? max : 1.0,
-              onChanged: max > 0 ? (v) => setState(() => _dragValue = v) : null,
-              onChangeEnd: (v) {
-                player.seek(Duration(milliseconds: v.round()));
-                setState(() => _dragValue = null);
-              },
-            ),
+            slider,
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(formatDuration(Duration(milliseconds: value.round()))),
-                  Text(formatDuration(dur)),
-                ],
+                children: [posText, durText],
               ),
             ),
           ],
@@ -188,28 +400,35 @@ class _SeekBarState extends State<_SeekBar> {
   }
 }
 
-class _Controls extends StatelessWidget {
+/// Boutons aléatoire / précédent / lecture / suivant / répéter.
+class PlayerControls extends StatelessWidget {
   final PlayerController pc;
-  const _Controls({required this.pc});
+  final bool compact;
+  const PlayerControls({super.key, required this.pc, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
     final player = pc.player;
-    final primary = Theme.of(context).colorScheme.primary;
     final loop = player.loopMode;
+    final skipSize = compact ? 28.0 : 40.0;
+    final playBox = compact ? 48.0 : 72.0;
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      mainAxisAlignment: compact
+          ? MainAxisAlignment.center
+          : MainAxisAlignment.spaceEvenly,
+      mainAxisSize: compact ? MainAxisSize.min : MainAxisSize.max,
       children: [
-        IconButton(
-          tooltip: 'Aléatoire',
-          icon: Icon(
-            Icons.shuffle,
-            color: player.shuffleModeEnabled ? primary : null,
-          ),
+        _ModeButton(
+          active: player.shuffleModeEnabled,
+          tooltip: player.shuffleModeEnabled
+              ? 'Aléatoire : activé'
+              : 'Aléatoire : désactivé',
+          icon: Icons.shuffle,
           onPressed: pc.toggleShuffle,
         ),
         IconButton(
-          iconSize: 40,
+          tooltip: 'Précédent',
+          iconSize: skipSize,
           icon: const Icon(Icons.skip_previous),
           onPressed: pc.previous,
         ),
@@ -222,15 +441,16 @@ class _Controls extends StatelessWidget {
                 state?.processingState == ProcessingState.buffering;
             final playing = state?.playing ?? false;
             return SizedBox(
-              width: 72,
-              height: 72,
+              width: playBox,
+              height: playBox,
               child: loading && playing
-                  ? const Padding(
-                      padding: EdgeInsets.all(18),
-                      child: CircularProgressIndicator(),
+                  ? Padding(
+                      padding: EdgeInsets.all(playBox / 4),
+                      child: const CircularProgressIndicator(),
                     )
                   : IconButton.filled(
-                      iconSize: 44,
+                      tooltip: playing ? 'Pause' : 'Lecture',
+                      iconSize: playBox * 0.6,
                       icon: Icon(playing ? Icons.pause : Icons.play_arrow),
                       onPressed: playing ? player.pause : player.play,
                     ),
@@ -238,19 +458,121 @@ class _Controls extends StatelessWidget {
           },
         ),
         IconButton(
-          iconSize: 40,
+          tooltip: 'Suivant',
+          iconSize: skipSize,
           icon: const Icon(Icons.skip_next),
           onPressed: player.hasNext ? player.seekToNext : null,
         ),
-        IconButton(
-          tooltip: 'Répéter',
-          icon: Icon(
-            loop == LoopMode.one ? Icons.repeat_one : Icons.repeat,
-            color: loop == LoopMode.off ? null : primary,
-          ),
+        _ModeButton(
+          active: loop != LoopMode.off,
+          tooltip: switch (loop) {
+            LoopMode.off => 'Répéter : désactivé',
+            LoopMode.all => 'Répéter : toute la file',
+            LoopMode.one => 'Répéter : ce morceau',
+          },
+          icon: loop == LoopMode.one ? Icons.repeat_one : Icons.repeat,
           onPressed: pc.cycleRepeat,
         ),
       ],
+    );
+  }
+}
+
+/// Bouton de mode (aléatoire, répétition) : bien visible quand il est actif,
+/// avec un fond coloré et un petit point dessous.
+class _ModeButton extends StatelessWidget {
+  final bool active;
+  final String tooltip;
+  final IconData icon;
+  final VoidCallback onPressed;
+  const _ModeButton({
+    required this.active,
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final button = active
+        ? IconButton.filled(
+            tooltip: tooltip,
+            isSelected: true,
+            icon: Icon(icon),
+            onPressed: onPressed,
+          )
+        : IconButton(
+            tooltip: tooltip,
+            icon: Icon(
+              icon,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+            ),
+            onPressed: onPressed,
+          );
+    return Stack(
+      clipBehavior: Clip.none,
+      alignment: Alignment.center,
+      children: [
+        button,
+        if (active)
+          Positioned(
+            bottom: -2,
+            child: Container(
+              width: 5,
+              height: 5,
+              decoration: BoxDecoration(
+                color: scheme.primary,
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Bouton muet + barre de volume (mémorisé entre les sessions).
+class VolumeControl extends StatelessWidget {
+  final PlayerController pc;
+  const VolumeControl({super.key, required this.pc});
+
+  @override
+  Widget build(BuildContext context) {
+    // Volume choisi par l'utilisateur (pas celui, plus bas, d'un fondu).
+    return ValueListenableBuilder<double>(
+      valueListenable: pc.volume,
+      builder: (context, v, _) {
+        final icon = v == 0
+            ? Icons.volume_off
+            : v < 0.5
+            ? Icons.volume_down
+            : Icons.volume_up;
+        // Molette : ±5 % par cran.
+        return MouseWheel(
+          onStep: (d) => pc.setVolume(((v + d * 0.05) * 20).round() / 20),
+          child: Row(
+            children: [
+              IconButton(
+                tooltip: v == 0 ? 'Rétablir le son' : 'Couper le son',
+                icon: Icon(icon),
+                onPressed: pc.toggleMute,
+              ),
+              Expanded(
+                child: Slider(
+                  value: v,
+                  // Glisser change le volume en direct ; il est mémorisé
+                  // quand on relâche.
+                  onChanged: pc.previewVolume,
+                  onChangeEnd: pc.setVolume,
+                  semanticFormatterCallback: (x) =>
+                      'Volume ${(x * 100).round()} %',
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -9,6 +9,7 @@ import '../state/session.dart';
 import 'album_screen.dart';
 import 'artist_screen.dart';
 import 'mini_player.dart';
+import 'playlist_picker.dart';
 import 'playlist_screen.dart';
 import 'widgets.dart';
 
@@ -234,7 +235,8 @@ class _SearchScreenState extends State<SearchScreen> {
                       itemId: p.imageItemId,
                       fallback: Icons.queue_music,
                     ),
-                    title: Text(p.name),
+                    title: Text(p.displayName),
+                    trailing: PlaylistBadge(playlist: p),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
                         builder: (_) => PlaylistScreen(playlist: p),

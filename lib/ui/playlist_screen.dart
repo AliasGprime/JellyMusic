@@ -20,11 +20,18 @@ class PlaylistScreen extends StatefulWidget {
 class _PlaylistScreenState extends State<PlaylistScreen> {
   List<JItem>? _tracks;
   Object? _error;
-  late String _name = widget.playlist.name;
+
+  /// La playlist telle que connue maintenant (son nom peut changer).
+  late JItem _pl = widget.playlist;
+  String get _name => _pl.displayName;
   late final PlaylistStore _store = context.read<PlaylistStore>();
   int _seenRevision = 0;
 
   String get _id => widget.playlist.id;
+
+  /// Playlist Spotify : lecture seule (rien ne peut être ajouté, retiré,
+  /// déplacé, renommé ni supprimé).
+  bool get _locked => _pl.isLocked;
 
   @override
   void initState() {
@@ -47,7 +54,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       if (_store.lastChangedId == _id) _load();
     }
     final p = _store.playlists?.where((p) => p.id == _id).firstOrNull;
-    if (p != null && p.name != _name && mounted) setState(() => _name = p.name);
+    if (p != null && p.name != _pl.name && mounted) setState(() => _pl = p);
   }
 
   Future<void> _load() async {
@@ -70,6 +77,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   }
 
   Future<void> _remove(int index) async {
+    if (_locked) return;
     final tracks = _tracks!;
     final t = tracks[index];
     setState(() => tracks.removeAt(index));
@@ -108,6 +116,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   }
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
+    if (_locked) return;
     final tracks = _tracks!;
     if (newIndex == oldIndex) return;
     final t = tracks.removeAt(oldIndex);
@@ -122,6 +131,7 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   }
 
   Future<void> _rename() async {
+    if (_locked) return;
     var initial = _name;
     String name;
     while (true) {
@@ -167,14 +177,14 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       initial = name;
     }
     try {
-      await _store.rename(_id, name);
-      setState(() => _name = name);
+      await _store.rename(_pl, name);
     } catch (e) {
       _snack('Renommage impossible : $e');
     }
   }
 
   Future<void> _delete() async {
+    if (_locked) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -212,12 +222,114 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
   }
 
   void _addSongs() {
+    if (_locked) return;
     Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) =>
-            SearchScreen(target: widget.playlist, targetName: _name),
+        builder: (_) => SearchScreen(target: _pl, targetName: _name),
       ),
     );
+  }
+
+  /// Rend la playlist privée (seulement ce compte) ou publique (tous).
+  Future<void> _setPrivate(bool private) async {
+    if (_locked) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(private ? 'Rendre privée ?' : 'Rendre publique ?'),
+        content: Text(
+          private
+              ? '« $_name » ne sera plus visible que par votre compte. Elle '
+                    'disparaîtra pour les autres comptes.'
+              : '« $_name » sera visible par tous les comptes du serveur.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Annuler'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(private ? 'Rendre privée' : 'Rendre publique'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await _store.setPrivate(_pl, private);
+      _snack(
+        private
+            ? '« $_name » est maintenant privée'
+            : '« $_name » est maintenant publique',
+      );
+    } catch (e) {
+      _snack('Changement impossible : $e');
+    }
+  }
+
+  /// Copie la playlist (ex. une playlist Spotify) dans une nouvelle playlist
+  /// modifiable, puis l'ouvre.
+  Future<void> _clone() async {
+    var initial = _pl.isSpotify ? _pl.baseName : '${_pl.baseName} (copie)';
+    var private = true;
+    NewPlaylist? asked;
+    while (true) {
+      asked = await askNewPlaylist(
+        context,
+        title: 'Cloner « $_name »',
+        action: 'Cloner',
+        initial: initial,
+        private: private,
+      );
+      if (asked == null || !mounted) return;
+      initial = asked.name;
+      private = asked.private;
+      final JItem? existing;
+      try {
+        existing = await findPlaylistByName(_store, asked.name);
+      } catch (e) {
+        _snack('$e');
+        return;
+      }
+      if (existing == null || !mounted) break;
+      final again = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('« ${existing!.displayName} » existe déjà'),
+          content: Text(
+            '${describeExisting(existing)}\n\n'
+            'Cloner sous ce nom donnerait deux playlists portant le même nom.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cloner quand même'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Changer le nom'),
+            ),
+          ],
+        ),
+      );
+      if (again == null || !mounted) return;
+      if (!again) break;
+    }
+    final nav = Navigator.of(context);
+    _snack('Clonage en cours…');
+    try {
+      final id = await _store.clone(_pl, asked.name, private: asked.private);
+      final copy = _store.playlists?.where((p) => p.id == id).firstOrNull;
+      _snack('Playlist « ${asked.name} » créée');
+      if (copy != null && mounted) {
+        nav.push(
+          MaterialPageRoute(builder: (_) => PlaylistScreen(playlist: copy)),
+        );
+      }
+    } catch (e) {
+      _snack('Clonage impossible : $e');
+    }
   }
 
   @override
@@ -252,7 +364,30 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
             ].join(' · '),
           ),
           if (tracks.isNotEmpty) PlayButtons(loadTracks: () async => tracks),
-          if (tracks.isEmpty)
+          if (_locked)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.lock_outline,
+                    size: 16,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'Playlist importée de Spotify : verrouillée, en lecture '
+                      'seule.',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else if (tracks.isEmpty)
             Padding(
               padding: const EdgeInsets.all(24),
               child: Column(
@@ -287,41 +422,47 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
 
       body = RefreshIndicator(
         onRefresh: _load,
-        child: ReorderableListView.builder(
-          header: header,
-          buildDefaultDragHandles: false,
-          itemCount: tracks.length,
-          onReorderItem: _reorder,
-          itemBuilder: (context, i) {
-            final t = tracks[i];
-            return Dismissible(
-              key: ValueKey(t.playlistItemId ?? '${t.id}-$i'),
-              direction: DismissDirection.endToStart,
-              background: Container(
-                color: Theme.of(context).colorScheme.errorContainer,
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.symmetric(horizontal: 24),
-                child: Icon(
-                  Icons.playlist_remove,
-                  color: Theme.of(context).colorScheme.onErrorContainer,
-                ),
+        child: _locked
+            ? ListView.builder(
+                itemCount: tracks.length + 1,
+                itemBuilder: (context, i) =>
+                    i == 0 ? header : TrackTile(tracks: tracks, index: i - 1),
+              )
+            : ReorderableListView.builder(
+                header: header,
+                buildDefaultDragHandles: false,
+                itemCount: tracks.length,
+                onReorderItem: _reorder,
+                itemBuilder: (context, i) {
+                  final t = tracks[i];
+                  return Dismissible(
+                    key: ValueKey(t.playlistItemId ?? '${t.id}-$i'),
+                    direction: DismissDirection.endToStart,
+                    background: Container(
+                      color: Theme.of(context).colorScheme.errorContainer,
+                      alignment: Alignment.centerRight,
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      child: Icon(
+                        Icons.playlist_remove,
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                      ),
+                    ),
+                    onDismissed: (_) => _remove(i),
+                    child: TrackTile(
+                      tracks: tracks,
+                      index: i,
+                      onRemove: () => _remove(i),
+                      dragHandle: ReorderableDragStartListener(
+                        index: i,
+                        child: const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: Icon(Icons.drag_handle),
+                        ),
+                      ),
+                    ),
+                  );
+                },
               ),
-              onDismissed: (_) => _remove(i),
-              child: TrackTile(
-                tracks: tracks,
-                index: i,
-                onRemove: () => _remove(i),
-                dragHandle: ReorderableDragStartListener(
-                  index: i,
-                  child: const Padding(
-                    padding: EdgeInsets.all(8),
-                    child: Icon(Icons.drag_handle),
-                  ),
-                ),
-              ),
-            );
-          },
-        ),
       );
     }
 
@@ -329,22 +470,68 @@ class _PlaylistScreenState extends State<PlaylistScreen> {
       appBar: AppBar(
         title: Text(_name),
         actions: [
-          IconButton(
-            tooltip: 'Ajouter des morceaux',
-            icon: const Icon(Icons.playlist_add),
-            onPressed: _addSongs,
-          ),
+          if (_locked)
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4),
+              child: Tooltip(
+                message: 'Playlist Spotify verrouillée',
+                child: Icon(Icons.lock_outline),
+              ),
+            )
+          else ...[
+            if (_pl.isPrivate)
+              const Tooltip(
+                message: 'Privée : visible seulement par vous',
+                child: Icon(Icons.person_outline),
+              ),
+            IconButton(
+              tooltip: 'Ajouter des morceaux',
+              icon: const Icon(Icons.playlist_add),
+              onPressed: _addSongs,
+            ),
+          ],
           PopupMenuButton<String>(
             onSelected: (v) {
               if (v == 'rename') _rename();
+              if (v == 'private') _setPrivate(true);
+              if (v == 'public') _setPrivate(false);
+              if (v == 'clone') _clone();
               if (v == 'delete') _delete();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'rename', child: Text('Renommer')),
-              PopupMenuItem(
-                value: 'delete',
-                child: Text('Supprimer la playlist'),
+            itemBuilder: (_) => [
+              if (!_locked) ...[
+                const PopupMenuItem(value: 'rename', child: Text('Renommer')),
+                _pl.isPrivate
+                    ? const PopupMenuItem(
+                        value: 'public',
+                        child: ListTile(
+                          leading: Icon(Icons.group_outlined),
+                          title: Text('Rendre publique'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      )
+                    : const PopupMenuItem(
+                        value: 'private',
+                        child: ListTile(
+                          leading: Icon(Icons.person_outline),
+                          title: Text('Rendre privée'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
+              ],
+              const PopupMenuItem(
+                value: 'clone',
+                child: ListTile(
+                  leading: Icon(Icons.copy_all_outlined),
+                  title: Text('Cloner'),
+                  contentPadding: EdgeInsets.zero,
+                ),
               ),
+              if (!_locked)
+                const PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Supprimer la playlist'),
+                ),
             ],
           ),
         ],

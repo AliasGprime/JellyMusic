@@ -88,20 +88,24 @@ class _LoginScreenState extends State<LoginScreen> {
                         style: theme.textTheme.bodyMedium,
                       ),
                       const SizedBox(height: 32),
-                      TextFormField(
-                        controller: _server,
-                        keyboardType: TextInputType.url,
-                        decoration: const InputDecoration(
-                          labelText: 'Adresse du serveur',
-                          hintText: 'http://mon-serveur:8096',
-                          prefixIcon: Icon(Icons.dns),
-                          border: OutlineInputBorder(),
+                      // Adresse imposée par serveur.txt (version web) :
+                      // le champ est masqué.
+                      if (!context.read<Session>().serverLocked) ...[
+                        TextFormField(
+                          controller: _server,
+                          keyboardType: TextInputType.url,
+                          decoration: const InputDecoration(
+                            labelText: 'Adresse du serveur',
+                            hintText: 'http://mon-serveur:8096',
+                            prefixIcon: Icon(Icons.dns),
+                            border: OutlineInputBorder(),
+                          ),
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'Adresse requise'
+                              : null,
                         ),
-                        validator: (v) => (v == null || v.trim().isEmpty)
-                            ? 'Adresse requise'
-                            : null,
-                      ),
-                      const SizedBox(height: 16),
+                        const SizedBox(height: 16),
+                      ],
                       TextFormField(
                         controller: _user,
                         autofillHints: const [AutofillHints.username],

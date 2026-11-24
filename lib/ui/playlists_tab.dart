@@ -79,10 +79,11 @@ class _PlaylistsTabState extends State<PlaylistsTab> {
               itemId: p.imageItemId,
               fallback: Icons.queue_music,
             ),
-            title: Text(p.name),
+            title: Text(p.displayName),
             subtitle: n == null
                 ? null
                 : Text(n == 1 ? '1 morceau' : '$n morceaux'),
+            trailing: PlaylistBadge(playlist: p),
             onTap: () => _open(p),
           );
         },

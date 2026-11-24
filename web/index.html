@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <!--
+    Adresse de base relative : l'application fonctionne dans n'importe quel
+    dossier du site (racine, /musique/, /jellymusic/…) sans recompilation.
+  -->
+  <base href="./">
+
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="JellyMusic – lecteur de musique pour Jellyfin">
+  <meta name="theme-color" content="#141218">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="JellyMusic">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="icon" type="image/png" href="favicon.png"/>
+
+  <title>JellyMusic</title>
+  <link rel="manifest" href="manifest.json">
+  <style>
+    html, body { margin: 0; height: 100%; background: #141218; }
+    #chargement {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 16px;
+      color: #cbc3dc; font: 16px system-ui, sans-serif;
+    }
+    #chargement .roue {
+      width: 36px; height: 36px; border-radius: 50%;
+      border: 4px solid #4a4458; border-top-color: #cfbcff;
+      animation: tourne 0.9s linear infinite;
+    }
+    @keyframes tourne { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div id="chargement"><div class="roue"></div>Chargement de JellyMusic…</div>
+  <script>
+    // Retire l'écran de chargement dès que Flutter a dessiné sa première image.
+    window.addEventListener('flutter-first-frame', function () {
+      var c = document.getElementById('chargement');
+      if (c) c.remove();
+    });
+  </script>
+  <script>
+    // Égaliseur 10 bandes (Web Audio). L'application appelle
+    // window.jmEq.set({enabled, preamp, gains}) ; le son du lecteur passe par
+    // les filtres seulement après la première activation de l'égaliseur.
+    window.jmEq = (function () {
+      var freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+      var state = { enabled: false, preamp: 0, gains: freqs.map(function () { return 0; }) };
+      // Gain de sortie (dB) de la normalisation du volume, avec limiteur.
+      var outputDb = 0;
+      var ctx = null, pre = null, filters = null, post = null, limiter = null, meter = null, attached = [], players = [];
+
+      // Le son passe par Web Audio seulement si l'égaliseur ou la
+      // normalisation est utilisé(e).
+      function needsGraph() { return state.enabled || outputDb !== 0; }
+
+      function buildGraph() {
+        if (ctx) return;
+        ctx = new (window.AudioContext || window.webkitAudioContext)();
+        pre = ctx.createGain();
+        filters = freqs.map(function (f, i) {
+          var b = ctx.createBiquadFilter();
+          b.type = i === 0 ? 'lowshelf' : i === freqs.length - 1 ? 'highshelf' : 'peaking';
+          b.frequency.value = f;
+          b.Q.value = 1.1;
+          return b;
+        });
+        var node = pre;
+        filters.forEach(function (f) { node.connect(f); node = f; });
+        // Gain de sortie puis limiteur : une hausse de volume ne sature pas.
+        post = ctx.createGain();
+        limiter = ctx.createDynamicsCompressor();
+        limiter.threshold.value = -1;
+        limiter.knee.value = 0;
+        limiter.ratio.value = 20;
+        limiter.attack.value = 0.003;
+        limiter.release.value = 0.25;
+        node.connect(post);
+        post.connect(limiter);
+        limiter.connect(ctx.destination);
+        node = limiter;
+        // Mesure du niveau de sortie (diagnostic, n'affecte pas le son).
+        meter = ctx.createAnalyser();
+        meter.fftSize = 2048;
+        node.connect(meter);
+      }
+
+      function apply() {
+        if (!ctx) return;
+        filters.forEach(function (f, i) { f.gain.value = state.enabled ? (state.gains[i] || 0) : 0; });
+        pre.gain.value = state.enabled ? Math.pow(10, (state.preamp || 0) / 20) : 1;
+        post.gain.value = Math.pow(10, outputDb / 20);
+      }
+
+      function attach(el) {
+        if (attached.indexOf(el) >= 0) return;
+        buildGraph();
+        try {
+          ctx.createMediaElementSource(el).connect(pre);
+          attached.push(el);
+        } catch (e) { console.warn('Égaliseur indisponible :', e); }
+        apply();
+      }
+
+      // Les flux audio viennent du serveur Jellyfin (autre port) : pour que
+      // Web Audio puisse les traiter, le lecteur doit les charger en CORS.
+      var srcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+      Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+        configurable: true,
+        enumerable: srcDesc.enumerable,
+        get: function () { return srcDesc.get.call(this); },
+        set: function (v) {
+          if (this instanceof HTMLAudioElement && this.crossOrigin === null) {
+            this.crossOrigin = 'anonymous';
+          }
+          srcDesc.set.call(this, v);
+        }
+      });
+
+      var origPlay = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        if (this instanceof HTMLAudioElement) {
+          if (players.indexOf(this) < 0) players.push(this);
+          if (needsGraph()) attach(this);
+          if (ctx && ctx.state === 'suspended') ctx.resume();
+        }
+        return origPlay.apply(this, arguments);
+      };
+
+      return {
+        frequencies: freqs,
+        set: function (s) {
+          if (typeof s === 'string') s = JSON.parse(s);
+          state.enabled = !!s.enabled;
+          state.preamp = +s.preamp || 0;
+          if (s.gains) state.gains = s.gains.map(Number);
+          if (needsGraph()) players.forEach(attach);
+          if (ctx && ctx.state === 'suspended') ctx.resume();
+          apply();
+        },
+        // Normalisation du volume : gain de sortie en dB (0 : aucun).
+        setOutput: function (db) {
+          outputDb = +db || 0;
+          if (needsGraph()) players.forEach(attach);
+          if (ctx && ctx.state === 'suspended') ctx.resume();
+          apply();
+        },
+        // Pour le diagnostic : état réel du traitement audio.
+        status: function () {
+          var level = 0;
+          if (meter) {
+            var buf = new Float32Array(meter.fftSize);
+            meter.getFloatTimeDomainData(buf);
+            for (var i = 0; i < buf.length; i++) level = Math.max(level, Math.abs(buf[i]));
+          }
+          return JSON.stringify({ actif: state.enabled, sortie_db: outputDb, reduction_limiteur: limiter ? +limiter.reduction.toFixed(1) : 0, contexte: ctx ? ctx.state : 'aucun', lecteurs: players.length, branches: attached.length, niveau_sortie: +level.toFixed(3) });
+        }
+      };
+    })();
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>

@@ -117,9 +117,26 @@ class QualityPanel extends StatelessWidget {
         prefixIcon: Icon(icon),
         border: const OutlineInputBorder(),
       ),
+      // Valeur choisie : nom court (« MP3 320 kb/s »), qui tient même sur un
+      // petit écran ; le menu ouvert garde les noms complets.
+      selectedItemBuilder: (_) => [
+        for (final k in PlayerController.qualityChoices)
+          Text(
+            PlayerController.qualityName(k),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+      ],
       items: [
         for (final k in PlayerController.qualityChoices)
-          DropdownMenuItem(value: k ?? 0, child: Text(qualityLabel(k))),
+          DropdownMenuItem(
+            value: k ?? 0,
+            child: Text(
+              qualityLabel(k),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
       ],
       onChanged: (v) => set(v == null || v == 0 ? null : v),
     );

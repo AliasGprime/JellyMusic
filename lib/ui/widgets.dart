@@ -361,7 +361,11 @@ class PlayButtons extends StatelessWidget {
             child: FilledButton.icon(
               onPressed: () => _play(context, false),
               icon: const Icon(Icons.play_arrow),
-              label: const Text('Lire'),
+              // Petit écran : le texte rapetisse au lieu de passer à la ligne.
+              label: const FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('Lire', maxLines: 1),
+              ),
             ),
           ),
           const SizedBox(width: 12),
@@ -369,7 +373,11 @@ class PlayButtons extends StatelessWidget {
             child: FilledButton.tonalIcon(
               onPressed: () => _play(context, true),
               icon: const Icon(Icons.shuffle),
-              label: const Text('Aléatoire'),
+              // Petit écran : le texte rapetisse au lieu de passer à la ligne.
+              label: const FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text('Aléatoire', maxLines: 1),
+              ),
             ),
           ),
         ],

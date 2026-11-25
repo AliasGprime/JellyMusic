@@ -61,27 +61,35 @@ class PlayerScreen extends StatelessWidget {
       ),
     );
 
-    final info = <Widget>[
+    // [compact] : petit écran (peu de hauteur) ; textes, boutons et
+    // espaces réduits pour que tout tienne sous la pochette.
+    List<Widget> info({bool compact = false}) => [
       Text(
         t.name,
-        maxLines: 2,
+        maxLines: compact ? 1 : 2,
         textAlign: TextAlign.center,
         overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.headlineSmall,
+        style: compact
+            ? theme.textTheme.titleLarge
+            : theme.textTheme.headlineSmall,
       ),
-      const SizedBox(height: 4),
+      SizedBox(height: compact ? 2 : 4),
       Text(
         t.artistLine,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.titleMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
+        style:
+            (compact ? theme.textTheme.titleSmall : theme.textTheme.titleMedium)
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
       ),
-      const SizedBox(height: 8),
+      SizedBox(height: compact ? 4 : 8),
       // Version écoutée (téléchargée, originale, MP3…) : touchez pour changer.
       Center(
         child: ActionChip(
+          visualDensity: compact ? VisualDensity.compact : null,
+          materialTapTargetSize: compact
+              ? MaterialTapTargetSize.shrinkWrap
+              : null,
           avatar: Icon(
             pc.currentIsLocal
                 ? Icons.download_done
@@ -98,18 +106,20 @@ class PlayerScreen extends StatelessWidget {
           padding: const EdgeInsets.only(top: 8),
           child: Text(
             pc.lastError!,
+            maxLines: compact ? 2 : null,
+            overflow: compact ? TextOverflow.ellipsis : null,
             style: TextStyle(color: theme.colorScheme.error),
           ),
         ),
-      const SizedBox(height: 16),
+      SizedBox(height: compact ? 4 : 16),
       SeekBar(player: pc.player, fallback: t.duration),
-      const SizedBox(height: 8),
-      PlayerControls(pc: pc),
-      const SizedBox(height: 4),
-      _SeekAndLoopControls(pc: pc),
-      const SizedBox(height: 8),
+      SizedBox(height: compact ? 0 : 8),
+      PlayerControls(pc: pc, dense: compact),
+      SizedBox(height: compact ? 0 : 4),
+      _SeekAndLoopControls(pc: pc, compact: compact),
+      SizedBox(height: compact ? 0 : 8),
       Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: EdgeInsets.symmetric(horizontal: compact ? 0 : 16),
         child: VolumeControl(pc: pc),
       ),
     ];
@@ -160,7 +170,7 @@ class PlayerScreen extends StatelessWidget {
                         width: 460,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
-                          children: info,
+                          children: info(),
                         ),
                       ),
                     ],
@@ -168,16 +178,44 @@ class PlayerScreen extends StatelessWidget {
                 ),
               );
             }
-            final size = (c.maxWidth - 48).clamp(120.0, c.maxHeight * 0.45);
+            // Petit écran : commandes compactes.
+            final compact = c.maxHeight < 640;
+            // Très peu de hauteur (ex. petit téléphone couché) : tout défile,
+            // avec une pochette réduite.
+            if (c.maxHeight < 420) {
+              return SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(24, 8, 24, 16),
+                child: Column(
+                  children: [
+                    cover((c.maxWidth - 48).clamp(80.0, 180.0)),
+                    const SizedBox(height: 8),
+                    ...info(compact: true),
+                  ],
+                ),
+              );
+            }
+            // Les commandes gardent leur taille ; la pochette prend la
+            // place qui reste (carrée, jamais plus large que l'écran).
             return Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 24),
+              padding: EdgeInsets.symmetric(horizontal: compact ? 16 : 24),
               child: Column(
                 children: [
-                  const Spacer(),
-                  cover(size),
-                  const Spacer(),
-                  ...info,
-                  const SizedBox(height: 24),
+                  Expanded(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: compact ? 8 : 16),
+                      child: LayoutBuilder(
+                        builder: (context, cc) {
+                          final size = cc.maxWidth < cc.maxHeight
+                              ? cc.maxWidth
+                              : cc.maxHeight;
+                          if (size < 48) return const SizedBox.shrink();
+                          return Center(child: cover(size));
+                        },
+                      ),
+                    ),
+                  ),
+                  ...info(compact: compact),
+                  SizedBox(height: compact ? 8 : 24),
                 ],
               ),
             );
@@ -191,7 +229,8 @@ class PlayerScreen extends StatelessWidget {
 /// Reculer / avancer de 10 s et boucle A-B (lecteur plein écran).
 class _SeekAndLoopControls extends StatelessWidget {
   final PlayerController pc;
-  const _SeekAndLoopControls({required this.pc});
+  final bool compact;
+  const _SeekAndLoopControls({required this.pc, this.compact = false});
 
   @override
   Widget build(BuildContext context) {
@@ -247,17 +286,22 @@ class _SeekAndLoopControls extends StatelessWidget {
             ),
           ],
         ),
-        SizedBox(
-          height: 20,
-          child: status == null
-              ? null
-              : Text(
-                  status,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: b == null ? scheme.onSurfaceVariant : scheme.primary,
+        // Petit écran : la ligne d'état n'occupe de place que si une boucle
+        // est en cours.
+        if (!compact || status != null)
+          SizedBox(
+            height: 20,
+            child: status == null
+                ? null
+                : Text(
+                    status,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: b == null
+                          ? scheme.onSurfaceVariant
+                          : scheme.primary,
+                    ),
                   ),
-                ),
-        ),
+          ),
       ],
     );
   }
@@ -339,6 +383,8 @@ Future<bool?> showWifiLostDialog(BuildContext context) {
 void showSourceSheet(BuildContext context) {
   showModalBottomSheet(
     context: context,
+    // Petit écran : la feuille peut prendre toute la hauteur (et défiler).
+    isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
     constraints: const BoxConstraints(maxWidth: 520),
@@ -567,15 +613,25 @@ class _SeekBarState extends State<SeekBar> {
 /// Boutons aléatoire / précédent / lecture / suivant / répéter.
 class PlayerControls extends StatelessWidget {
   final PlayerController pc;
+
+  /// Barre de lecture d'ordinateur : boutons petits et serrés.
   final bool compact;
-  const PlayerControls({super.key, required this.pc, this.compact = false});
+
+  /// Lecteur plein écran sur un petit écran : bouton de lecture réduit.
+  final bool dense;
+  const PlayerControls({
+    super.key,
+    required this.pc,
+    this.compact = false,
+    this.dense = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final player = pc.player;
     final loop = player.loopMode;
-    final skipSize = compact ? 28.0 : 40.0;
-    final playBox = compact ? 48.0 : 72.0;
+    final skipSize = compact ? 28.0 : (dense ? 34.0 : 40.0);
+    final playBox = compact ? 48.0 : (dense ? 60.0 : 72.0);
     return Row(
       mainAxisAlignment: compact
           ? MainAxisAlignment.center

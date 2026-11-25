@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models.dart';
 import 'session.dart';
@@ -41,16 +44,75 @@ class PlaylistStore extends ChangeNotifier {
   int revision = 0;
   String? lastChangedId;
 
+  /// Vrai si [playlists] vient de la copie gardée sur le téléphone.
+  bool _fromCache = false;
+
+  String get _cacheKey => 'playlists.cache.${session.client?.userId}';
+
+  /// Hors connexion : la dernière liste reçue du serveur, gardée sur le
+  /// téléphone (avec les morceaux de chaque playlist).
+  Future<void> _loadCache() async {
+    try {
+      final text = (await SharedPreferences.getInstance()).getString(_cacheKey);
+      if (text == null) {
+        playlists ??= [];
+      } else {
+        playlists = [
+          for (final e in jsonDecode(text) as List)
+            JItem.fromJson((e as Map)['item'] as Map<String, dynamic>)
+                .withMusic(((e['ids'] as List?) ?? const []).cast<String>()),
+        ];
+      }
+      _fromCache = true;
+    } catch (_) {
+      playlists ??= [];
+    }
+  }
+
+  Future<void> _saveCache(List<JItem> list) async {
+    if (kIsWeb) return;
+    try {
+      await (await SharedPreferences.getInstance()).setString(
+        _cacheKey,
+        jsonEncode([
+          for (final p in list)
+            {'item': p.toJson(), 'ids': p.musicIds ?? const <String>[]},
+        ]),
+      );
+    } catch (_) {}
+  }
+
   Future<void> refresh() async {
     final c = session.client;
     if (c == null) return;
-    loading = true;
+    // Souvent appelé pendant la construction d'un écran (initState) :
+    // prévenir les écrans à ce moment-là fait perdre la mise à jour de fin
+    // de chargement (liste qui tourne sans fin). On attend la fin de la
+    // construction.
+    final online = !session.offline;
+    if (online) loading = true; // évite deux chargements en même temps
+    await Future<void>.microtask(() {});
+    if (!online) {
+      await _loadCache();
+      error = null;
+      notifyListeners();
+      return;
+    }
     error = null;
     notifyListeners();
     try {
-      playlists = await c.playlists();
+      final list = await c.playlists();
+      playlists = list;
+      _fromCache = false;
+      await _saveCache(list);
     } catch (e) {
       error = e;
+      // Copie hors connexion : on montre l'erreur (et « Réessayer ») plutôt
+      // qu'une liste peut-être incomplète.
+      if (_fromCache) {
+        playlists = null;
+        _fromCache = false;
+      }
     } finally {
       loading = false;
       notifyListeners();
@@ -58,7 +120,9 @@ class PlaylistStore extends ChangeNotifier {
   }
 
   Future<void> ensureLoaded() async {
-    if (playlists == null && !loading) await refresh();
+    if (loading) return;
+    // Copie hors connexion : on recharge depuis le serveur dès que possible.
+    if (playlists == null || (_fromCache && !session.offline)) await refresh();
   }
 
   void _changed(String playlistId) {

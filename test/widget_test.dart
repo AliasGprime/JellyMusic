@@ -5,6 +5,7 @@ import 'package:jellymusic/state/download_store.dart';
 import 'package:jellymusic/state/equalizer_store.dart';
 import 'package:jellymusic/state/player_controller.dart';
 import 'package:jellymusic/state/session.dart';
+import 'package:jellymusic/ui/offline_library.dart';
 import 'package:jellymusic/update/update_dialog.dart';
 import 'package:jellymusic/update/updater.dart';
 
@@ -148,5 +149,13 @@ void main() {
     d.entries['b'] = e('b');
     expect(d.offlineStateOf(['a', 'b']), OfflineState.complete);
     expect(d.offlineStateOf(null), OfflineState.none);
+  });
+
+  test('lettres de la barre A-Z hors connexion', () {
+    expect(OfflineLibrary.startsWith('Éric', 'E'), isTrue);
+    expect(OfflineLibrary.startsWith('2Frères', '#'), isTrue);
+    expect(OfflineLibrary.startsWith('2Frères', 'F'), isFalse);
+    expect(OfflineLibrary.startsWith('abba', 'A'), isTrue);
+    expect(OfflineLibrary.startsWith('Zaz', null), isTrue);
   });
 }

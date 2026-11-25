@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
@@ -27,6 +29,9 @@ Future<void> main() async {
   await session.load();
   final downloads = DownloadStore(session);
   await downloads.init();
+  // Sans attendre : l'accueil affiche « Connexion au serveur… » en attendant,
+  // puis le mode hors connexion si le serveur ne répond pas.
+  session.checkServer();
   runApp(JellyMusicApp(session: session, downloads: downloads));
 }
 
@@ -55,6 +60,7 @@ class JellyMusicApp extends StatelessWidget {
         ),
       ],
       child: MaterialApp(
+        scaffoldMessengerKey: messengerKey,
         title: 'JellyMusic',
         debugShowCheckedModeBanner: false,
         themeMode: ThemeMode.system,
@@ -88,10 +94,26 @@ class _StartupUpdateCheck extends StatefulWidget {
   State<_StartupUpdateCheck> createState() => _StartupUpdateCheckState();
 }
 
+/// Pour afficher des messages courts depuis n'importe quel écran.
+final messengerKey = GlobalKey<ScaffoldMessengerState>();
+
 class _StartupUpdateCheckState extends State<_StartupUpdateCheck> {
+  StreamSubscription<String>? _msgSub;
+
+  @override
+  void dispose() {
+    _msgSub?.cancel();
+    super.dispose();
+  }
+
   @override
   void initState() {
     super.initState();
+    _msgSub = context.read<PlayerController>().messages.listen((m) {
+      messengerKey.currentState
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(m)));
+    });
     // En données mobiles, confirmation avant d'écouter en qualité originale.
     final pc = context.read<PlayerController>();
     pc.confirmOriginalOnMobile = (n) =>

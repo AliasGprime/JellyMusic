@@ -303,6 +303,21 @@ class DownloadsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Téléchargements')),
+      bottomNavigationBar: const MiniPlayer(),
+      body: const DownloadsList(),
+    );
+  }
+}
+
+/// Playlists et morceaux téléchargés (page « Téléchargements » et accueil
+/// hors connexion).
+class DownloadsList extends StatelessWidget {
+  const DownloadsList({super.key});
+
+  @override
+  Widget build(BuildContext context) {
     final d = context.watch<DownloadStore>();
     final tracks = d.allTracks;
     final playlists = d.playlists.values.toList()
@@ -319,49 +334,45 @@ class DownloadsScreen extends StatelessWidget {
       ),
     );
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Téléchargements')),
-      bottomNavigationBar: const MiniPlayer(),
-      body: ListView(
-        children: [
-          if (tracks.isEmpty && !d.busy)
-            const Padding(
-              padding: EdgeInsets.all(32),
-              child: Text(
-                'Aucun morceau téléchargé.\n\nPour écouter sans connexion, '
-                'utilisez « Télécharger… » dans le menu ⋮ d\'un morceau ou '
-                'd\'une playlist.',
-                textAlign: TextAlign.center,
+    return ListView(
+      children: [
+        if (tracks.isEmpty && !d.busy)
+          const Padding(
+            padding: EdgeInsets.all(32),
+            child: Text(
+              'Aucun morceau téléchargé.\n\nPour écouter sans connexion, '
+              'utilisez « Télécharger… » dans le menu ⋮ d\'un morceau ou '
+              'd\'une playlist.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        if (playlists.isNotEmpty) section('Playlists'),
+        for (final p in playlists)
+          ListTile(
+            leading: const CircleAvatar(child: Icon(Icons.queue_music)),
+            title: Text(p.name),
+            subtitle: Text(
+              '${d.tracksOf(p).length} morceau(x) sur ${p.trackIds.length}',
+            ),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => _DownloadedPlaylistScreen(id: p.id),
               ),
             ),
-          if (playlists.isNotEmpty) section('Playlists'),
-          for (final p in playlists)
-            ListTile(
-              leading: const CircleAvatar(child: Icon(Icons.queue_music)),
-              title: Text(p.name),
-              subtitle: Text(
-                '${d.tracksOf(p).length} morceau(x) sur ${p.trackIds.length}',
-              ),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => _DownloadedPlaylistScreen(id: p.id),
-                ),
-              ),
-              trailing: IconButton(
-                tooltip: 'Supprimer ce téléchargement',
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _confirmRemovePlaylist(context, p),
-              ),
+            trailing: IconButton(
+              tooltip: 'Supprimer ce téléchargement',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => _confirmRemovePlaylist(context, p),
             ),
-          if (tracks.isNotEmpty) ...[
-            section('Tous les morceaux (${tracks.length})'),
-            PlayButtons(loadTracks: () async => tracks),
-            for (var i = 0; i < tracks.length; i++)
-              TrackTile(tracks: tracks, index: i),
-          ],
-          const SizedBox(height: 16),
+          ),
+        if (tracks.isNotEmpty) ...[
+          section('Tous les morceaux (${tracks.length})'),
+          PlayButtons(loadTracks: () async => tracks),
+          for (var i = 0; i < tracks.length; i++)
+            TrackTile(tracks: tracks, index: i),
         ],
-      ),
+        const SizedBox(height: 16),
+      ],
     );
   }
 }

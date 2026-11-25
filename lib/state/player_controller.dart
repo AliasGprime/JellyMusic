@@ -49,6 +49,9 @@ class PlayerController extends ChangeNotifier {
 
   JellyfinClient? get _client => session.client;
 
+  /// Rapports d'écoute au serveur : aucun hors connexion.
+  JellyfinClient? get _reporter => session.offline ? null : session.client;
+
   Future<void> _init() async {
     final audioSession = await AudioSession.instance;
     await audioSession.configure(const AudioSessionConfiguration.music());
@@ -98,7 +101,7 @@ class PlayerController extends ChangeNotifier {
     _subs.add(
       player.playingStream.listen((playing) {
         final id = _reportedId;
-        if (id != null) _client?.reportProgress(id, _lastPosition, !playing);
+        if (id != null) _reporter?.reportProgress(id, _lastPosition, !playing);
       }),
     );
     _subs.add(
@@ -107,6 +110,9 @@ class PlayerController extends ChangeNotifier {
         notifyListeners();
       }),
     );
+    // Hors connexion : on passe les morceaux non téléchargés.
+    _subs.add(player.currentIndexStream.listen((_) => _skipUnavailable()));
+    session.addListener(_onSessionChanged);
     // Wi-Fi perdu en pleine écoute en qualité originale : pause et question.
     if (!kIsWeb) {
       final net = await _network();
@@ -118,7 +124,7 @@ class PlayerController extends ChangeNotifier {
     _progressTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       final id = _reportedId;
       if (id != null && player.playing) {
-        _client?.reportProgress(id, _lastPosition, false);
+        _reporter?.reportProgress(id, _lastPosition, false);
       }
     });
   }
@@ -230,6 +236,69 @@ class PlayerController extends ChangeNotifier {
     ),
   );
 
+  /// Messages courts à afficher (ex. morceau non téléchargé hors connexion).
+  final _messages = StreamController<String>.broadcast();
+  Stream<String> get messages => _messages.stream;
+
+  bool _wasOffline = false;
+
+  void _onSessionChanged() {
+    final off = session.offline;
+    if (off && !_wasOffline) _skipUnavailable();
+    _wasOffline = off;
+  }
+
+  static bool _isLocal(IndexedAudioSource s) =>
+      s is UriAudioSource && s.uri.scheme == 'file';
+
+  bool _skipping = false;
+
+  /// Hors connexion, si le morceau en cours n'est pas sur le téléphone :
+  /// passe au prochain morceau téléchargé de la file, ou s'arrête.
+  Future<void> _skipUnavailable() async {
+    if (!session.offline || _skipping) return;
+    final seq = player.sequence;
+    final idx = player.currentIndex;
+    if (seq.isEmpty || idx == null || idx >= seq.length) return;
+    if (_isLocal(seq[idx])) return;
+    final order = player.effectiveIndices;
+    final pos = order.indexOf(idx);
+    int? next;
+    for (var k = pos + 1; k < order.length && next == null; k++) {
+      if (_isLocal(seq[order[k]])) next = order[k];
+    }
+    if (next == null && player.loopMode == LoopMode.all) {
+      for (var k = 0; k < pos && next == null; k++) {
+        if (_isLocal(seq[order[k]])) next = order[k];
+      }
+    }
+    _skipping = true;
+    try {
+      if (next == null) {
+        // Fin des morceaux téléchargés : on revient au dernier morceau
+        // téléchargé (au début, en pause) plutôt que d'afficher un morceau
+        // qui ne peut pas être lu. Aucun dans la file : lecteur arrêté.
+        int? back;
+        for (var k = pos - 1; k >= 0 && back == null; k--) {
+          if (_isLocal(seq[order[k]])) back = order[k];
+        }
+        await player.pause();
+        if (back != null) {
+          await player.seek(Duration.zero, index: back);
+        } else {
+          await stop();
+        }
+        _messages.add(
+          'Hors connexion : plus aucun morceau téléchargé dans la file.',
+        );
+      } else {
+        await player.seek(Duration.zero, index: next);
+      }
+    } finally {
+      _skipping = false;
+    }
+  }
+
   /// Remplace la file et lance la lecture.
   Future<void> playItems(
     List<JItem> items, {
@@ -237,9 +306,25 @@ class PlayerController extends ChangeNotifier {
     bool shuffle = false,
   }) async {
     if (items.isEmpty || _client == null) return;
+    final net = await _network();
+    // Hors connexion : seulement les morceaux téléchargés.
+    final d = downloads;
+    if (!kIsWeb && d != null && (session.offline || net == _Net.none)) {
+      final chosen = shuffle ? null : items[start.clamp(0, items.length - 1)];
+      final avail = items.where((t) => d.isDownloaded(t.id)).toList();
+      if (avail.isEmpty || (chosen != null && !avail.contains(chosen))) {
+        _messages.add(
+          avail.isEmpty && items.length > 1
+              ? 'Hors connexion : aucun de ces morceaux n\'est téléchargé.'
+              : 'Hors connexion : ce morceau n\'est pas téléchargé.',
+        );
+        return;
+      }
+      if (chosen != null) start = avail.indexOf(chosen);
+      items = avail;
+    }
     // Qualité selon le réseau (Wi-Fi ou données mobiles) ; originale en
     // données mobiles : on demande d'abord.
-    final net = await _network();
     final kbps = await _checkMobileData(
       net == _Net.mobile ? mobileKbps : streamKbps,
       items,
@@ -280,7 +365,17 @@ class PlayerController extends ChangeNotifier {
 
   QueueShuffleOrder? _order;
 
+  /// Hors connexion : faux (avec un message) si [t] n'est pas téléchargé.
+  bool _canQueue(JItem t) {
+    if (!session.offline || (downloads?.isDownloaded(t.id) ?? false)) {
+      return true;
+    }
+    _messages.add("Hors connexion : ce morceau n'est pas téléchargé.");
+    return false;
+  }
+
   Future<void> playNext(JItem t) async {
+    if (!_canQueue(t)) return;
     if (player.sequence.isEmpty) return playItems([t]);
     final cur = player.currentIndex ?? -1;
     // En aléatoire aussi, il sera joué juste après le morceau en cours.
@@ -289,6 +384,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> addToQueue(JItem t) async {
+    if (!_canQueue(t)) return;
     if (player.sequence.isEmpty) return playItems([t]);
     _order?.insertAfter = null; // à la fin de la file
     await player.addAudioSource(_sourceFor(t));
@@ -361,9 +457,10 @@ class PlayerController extends ChangeNotifier {
   /// « Appliquer même si téléchargé » quand le fichier est de moins bonne
   /// qualité que celle du Wi-Fi.
   bool _playsDownload(JItem t) {
-    if (_streamOverride.containsKey(t.id)) return false;
     final d = downloads?.entries[t.id];
     if (d == null) return false;
+    if (session.offline) return true; // pas d'autre choix
+    if (_streamOverride.containsKey(t.id)) return false;
     if (_forceLocal.contains(t.id)) return true;
     if (_queueOnWifi && wifiOverDownloads && _better(_queueKbps, d.kbps)) {
       return false;
@@ -1033,18 +1130,20 @@ class PlayerController extends ChangeNotifier {
     _reportStop();
     if (now != null) {
       _reportedId = now;
-      _client?.reportPlaying(now);
+      _reporter?.reportPlaying(now);
     }
   }
 
   void _reportStop() {
     final prev = _reportedId;
-    if (prev != null) _client?.reportStopped(prev, _lastPosition);
+    if (prev != null) _reporter?.reportStopped(prev, _lastPosition);
     _reportedId = null;
   }
 
   @override
   void dispose() {
+    session.removeListener(_onSessionChanged);
+    _messages.close();
     _progressTimer?.cancel();
     _endCrossfade();
     volume.dispose();

@@ -40,7 +40,7 @@ class SettingsScreen extends StatelessWidget {
             title: Text(session.username.isEmpty ? '—' : session.username),
             subtitle: Text(session.serverUrl),
           ),
-          if (onLogout != null)
+          if (onLogout != null && !session.offline)
             ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Se déconnecter'),
@@ -49,6 +49,55 @@ class SettingsScreen extends StatelessWidget {
                 onLogout!();
               },
             ),
+          if (!kIsWeb) ...[
+            section('Hors connexion'),
+            // Serveur injoignable : avertissement complet.
+            if (session.serverUnreachable)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Card(
+                  margin: EdgeInsets.zero,
+                  color: theme.colorScheme.errorContainer,
+                  child: ListTile(
+                    leading: Icon(
+                      Icons.cloud_off,
+                      color: theme.colorScheme.onErrorContainer,
+                    ),
+                    title: Text(
+                      'Serveur injoignable',
+                      style: TextStyle(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'Seuls les morceaux téléchargés peuvent être écoutés. '
+                      'La connexion revient automatiquement avec le réseau.',
+                      style: TextStyle(
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                    ),
+                    trailing: IconButton(
+                      tooltip: 'Se reconnecter',
+                      icon: Icon(
+                        Icons.refresh,
+                        color: theme.colorScheme.onErrorContainer,
+                      ),
+                      onPressed: () => session.checkServer(),
+                    ),
+                  ),
+                ),
+              ),
+            SwitchListTile(
+              secondary: const Icon(Icons.cloud_off),
+              title: const Text('Mode hors connexion'),
+              subtitle: const Text(
+                'Utiliser seulement les morceaux téléchargés, même avec une '
+                'connexion Internet (aucune donnée utilisée).',
+              ),
+              value: session.forcedOffline,
+              onChanged: session.setForcedOffline,
+            ),
+          ],
           section('Lecture'),
           const QualityPanel(),
           const Divider(indent: 16, endIndent: 16),

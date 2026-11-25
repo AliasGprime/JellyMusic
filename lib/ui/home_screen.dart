@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../state/download_store.dart';
 import '../state/player_controller.dart';
 import '../state/playlist_store.dart';
 import '../state/session.dart';
@@ -9,6 +10,7 @@ import 'artist_screen.dart';
 import 'downloads.dart';
 import 'layout.dart';
 import 'mini_player.dart';
+import 'offline_library.dart';
 import 'player_bar.dart';
 import 'playlists_tab.dart';
 import 'search_screen.dart';
@@ -39,19 +41,27 @@ class _HomeScreenState extends State<HomeScreen> {
 
   late final List<Widget> _pages = _buildPages();
 
+  /// Navigateurs des onglets en cours (en ligne ou hors connexion).
+  List<GlobalKey<NavigatorState>> get _keys =>
+      context.read<Session>().offline ? _offlineNavKeys : _navKeys;
+
   void _selectTab(int i) {
     if (i == _tab) {
       // Re-cliquer l'onglet courant revient à sa page de départ.
-      _navKeys[i].currentState?.popUntil((r) => r.isFirst);
+      _keys[i].currentState?.popUntil((r) => r.isFirst);
     } else {
       setState(() => _tab = i);
     }
   }
 
   void _openSearch(BuildContext context) {
-    final route = MaterialPageRoute(builder: (_) => const SearchScreen());
+    final offline = context.read<Session>().offline;
+    final route = MaterialPageRoute(
+      builder: (_) =>
+          offline ? const OfflineSearchScreen() : const SearchScreen(),
+    );
     if (isWide(context)) {
-      _navKeys[_tab].currentState?.push(route);
+      _keys[_tab].currentState?.push(route);
     } else {
       Navigator.of(context).push(route);
     }
@@ -62,7 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (_) => SettingsScreen(onLogout: _logout),
     );
     if (isWide(context)) {
-      _navKeys[_tab].currentState?.push(route);
+      _keys[_tab].currentState?.push(route);
     } else {
       Navigator.of(context).push(route);
     }
@@ -80,23 +90,35 @@ class _HomeScreenState extends State<HomeScreen> {
       if (v == 'update') checkForUpdates(context, manual: true);
       if (v == 'logout') _logout();
     },
-    itemBuilder: (_) => [
-      const PopupMenuItem(value: 'shuffle', child: Text('Tout en aléatoire')),
-      if (!kIsWeb)
-        const PopupMenuItem(value: 'downloads', child: Text('Téléchargements')),
-      const PopupMenuItem(value: 'settings', child: Text('Paramètres')),
-      if (!kIsWeb)
-        const PopupMenuItem(
-          value: 'update',
-          child: Text('Rechercher une mise à jour'),
-        ),
-      const PopupMenuItem(value: 'logout', child: Text('Se déconnecter')),
-    ],
+    itemBuilder: (_) {
+      final offline = context.read<Session>().offline;
+      return [
+        const PopupMenuItem(value: 'shuffle', child: Text('Tout en aléatoire')),
+        if (!kIsWeb)
+          const PopupMenuItem(
+            value: 'downloads',
+            child: Text('Téléchargements'),
+          ),
+        const PopupMenuItem(value: 'settings', child: Text('Paramètres')),
+        if (!kIsWeb && !offline)
+          const PopupMenuItem(
+            value: 'update',
+            child: Text('Rechercher une mise à jour'),
+          ),
+        if (!offline)
+          const PopupMenuItem(value: 'logout', child: Text('Se déconnecter')),
+      ];
+    },
   );
 
   Future<void> _shuffleAll() async {
-    final client = context.read<Session>().client!;
     final player = context.read<PlayerController>();
+    if (context.read<Session>().offline) {
+      final tracks = context.read<DownloadStore>().allTracks;
+      if (tracks.isNotEmpty) await player.playItems(tracks, shuffle: true);
+      return;
+    }
+    final client = context.read<Session>().client!;
     final messenger = ScaffoldMessenger.of(context);
     try {
       await player.playItems(await client.randomSongs());
@@ -172,10 +194,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    if (isWide(context)) return _buildDesktop(context);
+    final offline = context.select<Session, bool>((s) => s.offline);
+    final checking = context.select<Session, bool>(
+      (s) => s.server == ServerState.checking,
+    );
+    if (!offline && checking) return _buildChecking(context);
+    final pages = offline ? _offlinePagesFor(context) : _pages;
+    if (isWide(context)) return _buildDesktop(context, pages, offline);
     return Scaffold(
       appBar: AppBar(
         title: Text(_titles[_tab]),
+        bottom: offline ? _offlineBar(context) : null,
         actions: [
           IconButton(
             tooltip: 'Rechercher',
@@ -185,8 +214,14 @@ class _HomeScreenState extends State<HomeScreen> {
           _menuButton(),
         ],
       ),
-      body: IndexedStack(index: _tab, children: _pages),
-      floatingActionButton: _tab == 3 ? const NewPlaylistButton() : null,
+      body: IndexedStack(
+        key: ValueKey(offline ? 'off$_offlineRev' : 'on'),
+        index: _tab,
+        children: pages,
+      ),
+      floatingActionButton: _tab == 3 && !offline
+          ? const NewPlaylistButton()
+          : null,
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -215,14 +250,83 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  /// Démarrage : on vérifie que le serveur répond.
+  Widget _buildChecking(BuildContext context) {
+    return const Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 16),
+            Text('Connexion au serveur…'),
+          ],
+        ),
+      ),
+      bottomNavigationBar: MiniPlayer(),
+    );
+  }
+
+  /// Pages hors connexion, refaites quand les téléchargements changent.
+  int _offlineRev = -1;
+  List<Widget> _offlinePages = const [];
+  List<GlobalKey<NavigatorState>> _offlineNavKeys = const [];
+
+  List<Widget> _offlinePagesFor(BuildContext context) {
+    final d = context.watch<DownloadStore>();
+    if (d.revision != _offlineRev || _offlinePages.isEmpty) {
+      _offlineRev = d.revision;
+      _offlinePages = offlinePages(d);
+      _offlineNavKeys = List.generate(4, (_) => GlobalKey<NavigatorState>());
+    }
+    return _offlinePages;
+  }
+
+  /// Une seule ligne « Hors connexion » sous le titre ; le détail est dans
+  /// les Paramètres.
+  PreferredSizeWidget _offlineBar(BuildContext context) {
+    final theme = Theme.of(context);
+    return PreferredSize(
+      preferredSize: const Size.fromHeight(28),
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest,
+        child: InkWell(
+          onTap: () => _openSettings(context),
+          child: SizedBox(
+            height: 28,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.cloud_off,
+                  size: 16,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Hors connexion',
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   /// Ordinateur : barre latérale | contenu | barre de lecture en bas.
-  Widget _buildDesktop(BuildContext context) {
+  Widget _buildDesktop(BuildContext context, List<Widget> pages, bool offline) {
+    final navKeys = offline ? _offlineNavKeys : _navKeys;
     final theme = Theme.of(context);
     final extended = MediaQuery.sizeOf(context).width >= 1200;
     return PlayerBarScope(
       child: Scaffold(
         body: Column(
           children: [
+            if (offline) SafeArea(bottom: false, child: _offlineBar(context)),
             Expanded(
               child: Row(
                 children: [
@@ -298,16 +402,17 @@ class _HomeScreenState extends State<HomeScreen> {
                   // où que soit la souris.
                   Expanded(
                     child: IndexedStack(
+                      key: ValueKey(offline ? 'off$_offlineRev' : 'on'),
                       index: _tab,
                       children: [
                         for (var i = 0; i < 4; i++)
                           Navigator(
-                            key: _navKeys[i],
+                            key: navKeys[i],
                             onGenerateRoute: (_) => MaterialPageRoute(
                               builder: (_) => Scaffold(
                                 appBar: AppBar(title: Text(_titles[i])),
-                                body: _pages[i],
-                                floatingActionButton: i == 3
+                                body: pages[i],
+                                floatingActionButton: i == 3 && !offline
                                     ? const NewPlaylistButton()
                                     : null,
                               ),

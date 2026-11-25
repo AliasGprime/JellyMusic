@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,11 @@ import '../models.dart';
 class JellyfinException implements Exception {
   final String message;
   JellyfinException(this.message);
+
+  /// Le serveur ne répond pas (pas d'Internet, serveur éteint…).
+  static final unreachable = JellyfinException(
+    'Impossible de joindre le serveur. Vérifiez votre connexion Internet.',
+  );
   @override
   String toString() => message;
 }
@@ -76,9 +82,16 @@ class JellyfinClient {
         'Fields': f == null ? 'NormalizationGain' : '$f,NormalizationGain',
       };
     }
-    final res = await _http
-        .get(_uri(path, query), headers: _headers)
-        .timeout(const Duration(seconds: 20));
+    final http.Response res;
+    try {
+      res = await _http
+          .get(_uri(path, query), headers: _headers)
+          .timeout(const Duration(seconds: 20));
+    } on http.ClientException {
+      throw JellyfinException.unreachable;
+    } on TimeoutException {
+      throw JellyfinException.unreachable;
+    }
     if (res.statusCode == 401) {
       throw JellyfinException('Session expirée, reconnectez-vous.');
     }
@@ -95,6 +108,21 @@ class JellyfinClient {
           .timeout(const Duration(seconds: 10));
     } catch (_) {
       // Les rapports de lecture ne doivent jamais bloquer la musique.
+    }
+  }
+
+  /// Vrai si le serveur répond rapidement (sert à choisir, au démarrage,
+  /// entre le mode normal et le mode hors connexion).
+  Future<bool> reachable({
+    Duration timeout = const Duration(seconds: 5),
+  }) async {
+    try {
+      final res = await _http
+          .get(_uri('/System/Info/Public'), headers: _headers)
+          .timeout(timeout);
+      return res.statusCode < 500;
+    } catch (_) {
+      return false;
     }
   }
 
@@ -339,9 +367,16 @@ class JellyfinClient {
     final req = http.Request(method, _uri(path, query))
       ..headers.addAll(_headers);
     if (body != null) req.body = jsonEncode(body);
-    final res = await http.Response.fromStream(
-      await _http.send(req).timeout(const Duration(seconds: 20)),
-    );
+    final http.Response res;
+    try {
+      res = await http.Response.fromStream(
+        await _http.send(req).timeout(const Duration(seconds: 20)),
+      );
+    } on http.ClientException {
+      throw JellyfinException.unreachable;
+    } on TimeoutException {
+      throw JellyfinException.unreachable;
+    }
     if (res.statusCode == 401 || res.statusCode == 403) {
       throw JellyfinException(
         'Action refusée par le serveur (${res.statusCode}).',

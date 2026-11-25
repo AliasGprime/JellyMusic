@@ -11,6 +11,7 @@ import '../state/session.dart';
 import 'album_screen.dart';
 import 'downloads.dart';
 import 'layout.dart';
+import 'offline_library.dart';
 import 'playlist_picker.dart';
 
 /// Pochette d'album (ou photo d'artiste) avec une icône de secours.
@@ -58,9 +59,11 @@ class CoverImage extends StatelessWidget {
         ),
       );
     }
+    // Hors connexion : rien n'est demandé au serveur.
+    final offline = context.select<Session, bool>((s) => s.offline);
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
-      child: url == null
+      child: url == null || offline
           ? placeholder
           : CachedNetworkImage(
               imageUrl: url,
@@ -242,6 +245,7 @@ class TrackMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final player = context.read<PlayerController>();
+    final offline = context.read<Session>().offline;
     return PopupMenuButton<String>(
       icon: const Icon(Icons.more_vert),
       onSelected: (v) {
@@ -282,7 +286,9 @@ class TrackMenu extends StatelessWidget {
               const SnackBar(content: Text('Téléchargement supprimé')),
             );
           case 'album':
-            if (track.albumId != null) {
+            if (offline) {
+              openOfflineAlbum(context, track);
+            } else if (track.albumId != null) {
               Navigator.of(context).push(
                 MaterialPageRoute(
                   builder: (_) => AlbumScreen(
@@ -297,17 +303,18 @@ class TrackMenu extends StatelessWidget {
       itemBuilder: (_) => [
         const PopupMenuItem(value: 'next', child: Text('Lire ensuite')),
         const PopupMenuItem(value: 'queue', child: Text('Ajouter à la file')),
-        const PopupMenuItem(
-          value: 'playlist',
-          child: Text('Ajouter à une playlist…'),
-        ),
-        if (onRemove != null)
+        if (!offline)
+          const PopupMenuItem(
+            value: 'playlist',
+            child: Text('Ajouter à une playlist…'),
+          ),
+        if (onRemove != null && !offline)
           const PopupMenuItem(
             value: 'remove',
             child: Text('Retirer de la playlist'),
           ),
         if (context.read<DownloadStore>().supported)
-          (context.read<DownloadStore>().isQueued(track.id) ||
+          ?(context.read<DownloadStore>().isQueued(track.id) ||
                   context.read<DownloadStore>().progressOf(track.id) != null)
               ? const PopupMenuItem(
                   value: 'canceldl',
@@ -318,11 +325,13 @@ class TrackMenu extends StatelessWidget {
                   value: 'undownload',
                   child: Text('Supprimer le téléchargement'),
                 )
+              : offline
+              ? null
               : const PopupMenuItem(
                   value: 'download',
                   child: Text('Télécharger…'),
                 ),
-        if (track.albumId != null)
+        if (track.albumId != null || offline)
           const PopupMenuItem(value: 'album', child: Text('Voir l\'album')),
       ],
     );
@@ -652,22 +661,32 @@ class LetterBar extends StatelessWidget {
 /// Carte d'album pour les grilles.
 class AlbumCard extends StatelessWidget {
   final JItem album;
-  const AlbumCard({super.key, required this.album});
+
+  /// Hors connexion : pochette à afficher et action au toucher.
+  final String? coverId;
+  final VoidCallback? onTap;
+  const AlbumCard({super.key, required this.album, this.coverId, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
       borderRadius: BorderRadius.circular(8),
-      onTap: () => Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => AlbumScreen(albumId: album.id, title: album.name),
-        ),
-      ),
+      onTap:
+          onTap ??
+          () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => AlbumScreen(albumId: album.id, title: album.name),
+            ),
+          ),
       child: LayoutBuilder(
         builder: (context, c) => Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            CoverImage(itemId: album.imageItemId, size: c.maxWidth, radius: 8),
+            CoverImage(
+              itemId: coverId ?? album.imageItemId,
+              size: c.maxWidth,
+              radius: 8,
+            ),
             const SizedBox(height: 6),
             Text(
               album.name,

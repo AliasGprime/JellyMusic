@@ -126,6 +126,26 @@ class JellyfinClient {
     }
   }
 
+  /// Vrai si le serveur répond mais ne renvoie aucun morceau pour ce
+  /// compte (ex. : analyse de la bibliothèque en cours). Faux en cas
+  /// d'erreur : les pages afficheront alors l'erreur elles-mêmes.
+  Future<bool> libraryEmpty() async {
+    try {
+      final r = await _get('/Items', {
+        'userId': userId!,
+        'IncludeItemTypes': 'Audio',
+        'Recursive': 'true',
+        'Limit': '1',
+        'EnableTotalRecordCount': 'true',
+      }).timeout(const Duration(seconds: 10));
+      final m = r as Map<String, dynamic>;
+      return (m['TotalRecordCount'] as int? ?? 0) == 0 &&
+          ((m['Items'] as List?)?.isEmpty ?? true);
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Vérifie que l'adresse pointe bien vers un serveur Jellyfin.
   Future<String> publicServerName() async {
     try {

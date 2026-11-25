@@ -46,8 +46,17 @@ class Session extends ChangeNotifier {
   /// Le serveur ne répond pas (sans compter le mode choisi).
   bool get serverUnreachable => server == ServerState.offline;
 
+  /// Le serveur répond mais ne renvoie aucune musique (ex. : analyse de la
+  /// bibliothèque en cours) : les morceaux téléchargés restent accessibles.
+  bool libraryEmpty = false;
+
   /// Seuls les morceaux téléchargés sont utilisés.
-  bool get offline => forcedOffline || serverUnreachable;
+  bool get offline => forcedOffline || serverUnreachable || libraryEmpty;
+
+  /// Le serveur peut être contacté (déconnexion, mises à jour…).
+  bool get serverAvailable => !forcedOffline && server == ServerState.online;
+
+  Timer? _emptyRetry;
 
   Future<void> setForcedOffline(bool on) async {
     if (kIsWeb || forcedOffline == on) return;
@@ -82,7 +91,28 @@ class Session extends ChangeNotifier {
     }
     if (client != c) return; // déconnecté entre-temps
     if (forcedOffline) return; // choisi pendant l'essai
+    final empty = ok && await c.libraryEmpty();
+    if (client != c || forcedOffline) return;
+    _setLibraryEmpty(empty);
     _setServer(ok ? ServerState.online : ServerState.offline);
+  }
+
+  /// Bibliothèque vide : nouvel essai chaque minute, jusqu'à ce que la
+  /// musique revienne.
+  void _setLibraryEmpty(bool empty) {
+    if (empty) {
+      _emptyRetry ??= Timer.periodic(const Duration(minutes: 1), (_) async {
+        final c = client;
+        if (c == null || forcedOffline || serverUnreachable) return;
+        if (!await c.libraryEmpty() && client == c) _setLibraryEmpty(false);
+      });
+    } else {
+      _emptyRetry?.cancel();
+      _emptyRetry = null;
+    }
+    if (libraryEmpty == empty) return;
+    libraryEmpty = empty;
+    notifyListeners();
   }
 
   /// Réseau coupé (plus de quelques secondes) : mode hors connexion. Réseau
@@ -212,11 +242,14 @@ class Session extends ChangeNotifier {
     await _prefs.setString(_kUser, c.userId!);
     this.server = ServerState.online;
     notifyListeners();
+    // Compte sans musique (ou analyse en cours) : téléchargements affichés.
+    if (!kIsWeb) _setLibraryEmpty(await c.libraryEmpty());
   }
 
   Future<void> logout() async {
     final c = client;
     client = null;
+    _setLibraryEmpty(false);
     await _prefs.remove(_kToken);
     await _prefs.remove(_kUser);
     notifyListeners();

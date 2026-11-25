@@ -40,7 +40,7 @@ class SettingsScreen extends StatelessWidget {
             title: Text(session.username.isEmpty ? '—' : session.username),
             subtitle: Text(session.serverUrl),
           ),
-          if (onLogout != null && !session.offline)
+          if (onLogout != null && session.serverAvailable)
             ListTile(
               leading: const Icon(Icons.logout),
               title: const Text('Se déconnecter'),
@@ -51,8 +51,10 @@ class SettingsScreen extends StatelessWidget {
             ),
           if (!kIsWeb) ...[
             section('Hors connexion'),
-            // Serveur injoignable : avertissement complet.
-            if (session.serverUnreachable)
+            // Serveur injoignable ou bibliothèque vide : avertissement
+            // complet.
+            if (session.serverUnreachable ||
+                (session.libraryEmpty && !session.forcedOffline))
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
                 child: Card(
@@ -64,14 +66,22 @@ class SettingsScreen extends StatelessWidget {
                       color: theme.colorScheme.onErrorContainer,
                     ),
                     title: Text(
-                      'Serveur injoignable',
+                      session.serverUnreachable
+                          ? 'Serveur injoignable'
+                          : 'Bibliothèque du serveur vide',
                       style: TextStyle(
                         color: theme.colorScheme.onErrorContainer,
                       ),
                     ),
                     subtitle: Text(
-                      'Seuls les morceaux téléchargés peuvent être écoutés. '
-                      'La connexion revient automatiquement avec le réseau.',
+                      session.serverUnreachable
+                          ? 'Seuls les morceaux téléchargés peuvent être '
+                                'écoutés. La connexion revient automatiquement '
+                                'avec le réseau.'
+                          : 'Le serveur ne renvoie aucune musique pour ce '
+                                'compte (analyse de la bibliothèque en cours ?). '
+                                'Les morceaux téléchargés sont affichés en '
+                                'attendant ; nouvel essai chaque minute.',
                       style: TextStyle(
                         color: theme.colorScheme.onErrorContainer,
                       ),
@@ -82,7 +92,9 @@ class SettingsScreen extends StatelessWidget {
                         Icons.refresh,
                         color: theme.colorScheme.onErrorContainer,
                       ),
-                      onPressed: () => session.checkServer(),
+                      onPressed: () => session.checkServer(
+                        quiet: !session.serverUnreachable,
+                      ),
                     ),
                   ),
                 ),

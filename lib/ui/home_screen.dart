@@ -91,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (v == 'logout') _logout();
     },
     itemBuilder: (_) {
-      final offline = context.read<Session>().offline;
+      final online = context.read<Session>().serverAvailable;
       return [
         const PopupMenuItem(value: 'shuffle', child: Text('Tout en aléatoire')),
         if (!kIsWeb)
@@ -100,12 +100,12 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Text('Téléchargements'),
           ),
         const PopupMenuItem(value: 'settings', child: Text('Paramètres')),
-        if (!kIsWeb && !offline)
+        if (!kIsWeb && online)
           const PopupMenuItem(
             value: 'update',
             child: Text('Rechercher une mise à jour'),
           ),
-        if (!offline)
+        if (online)
           const PopupMenuItem(value: 'logout', child: Text('Se déconnecter')),
       ];
     },
@@ -304,7 +304,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  'Hors connexion',
+                  context.select<Session, bool>((s) => s.libraryEmpty)
+                      ? 'Bibliothèque du serveur vide'
+                      : 'Hors connexion',
                   style: theme.textTheme.labelLarge?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                   ),

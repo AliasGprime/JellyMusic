@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models.dart';
 import '../state/download_store.dart';
 import '../state/playlist_store.dart';
+import 'library_tabs.dart';
 import 'mini_player.dart';
 import 'widgets.dart';
 
@@ -59,6 +60,31 @@ class OfflineLibrary {
         );
         return c != 0 ? c : _albumOrder(a, b);
       });
+  }
+
+  /// Un genre par nom, d'après les genres des morceaux téléchargés.
+  List<JItem> get genres {
+    final names = <String, String>{}; // minuscules → nom affiché
+    for (final t in tracks) {
+      for (final g in t.genres ?? const <String>[]) {
+        names.putIfAbsent(g.toLowerCase(), () => g);
+      }
+    }
+    return [
+      for (final n in names.values)
+        JItem(id: 'genre:$n', name: n, type: 'MusicGenre'),
+    ]..sort(_byName);
+  }
+
+  /// Chansons téléchargées d'un genre, par titre.
+  List<JItem> tracksOfGenre(String name) {
+    final key = name.toLowerCase();
+    return tracks
+        .where(
+          (t) =>
+              (t.genres ?? const <String>[]).any((g) => g.toLowerCase() == key),
+        )
+        .toList();
   }
 
   /// Un album par album des morceaux téléchargés. Son [JItem.id] est la
@@ -196,49 +222,80 @@ void openOfflineAlbum(BuildContext context, JItem track) {
 List<Widget> offlinePages(DownloadStore d) {
   final lib = OfflineLibrary(d);
   return [
-    PagedItems(
-      alphabet: true,
-      fetch: (s, l, letter) async =>
-          OfflineLibrary.page(lib.artists, s, l, letter),
-      emptyText: 'Aucun artiste téléchargé.',
-      itemBuilder: (context, items, i) {
-        final a = items[i];
-        return ListTile(
-          leading: const CoverImage(
-            itemId: null,
-            radius: 24,
-            fallback: Icons.person,
-          ),
-          title: Text(a.name),
-          onTap: () => Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => OfflineTracksScreen(
-                title: a.name,
-                tracks: lib.tracksOfArtist(a.name),
+    SegmentedPages(
+      labels: const ['Artistes', 'Albums'],
+      icons: const [Icons.person, Icons.album],
+      children: [
+        PagedItems(
+          alphabet: true,
+          fetch: (s, l, letter) async =>
+              OfflineLibrary.page(lib.artists, s, l, letter),
+          emptyText: 'Aucun artiste téléchargé.',
+          itemBuilder: (context, items, i) {
+            final a = items[i];
+            return ListTile(
+              leading: const CoverImage(
+                itemId: null,
+                radius: 24,
+                fallback: Icons.person,
               ),
-            ),
-          ),
-        );
-      },
+              title: Text(a.name),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => OfflineTracksScreen(
+                    title: a.name,
+                    tracks: lib.tracksOfArtist(a.name),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+        PagedItems(
+          grid: true,
+          alphabet: true,
+          fetch: (s, l, letter) async =>
+              OfflineLibrary.page(lib.albums, s, l, letter),
+          emptyText: 'Aucun album téléchargé.',
+          itemBuilder: (context, items, i) {
+            final a = items[i];
+            return AlbumCard(
+              album: a,
+              coverId: lib.coverOfAlbum(a.id),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => OfflineTracksScreen(
+                    title: a.name,
+                    tracks: lib.tracksOfAlbum(a.id),
+                    album: true,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ],
     ),
     PagedItems(
-      grid: true,
       alphabet: true,
       fetch: (s, l, letter) async =>
-          OfflineLibrary.page(lib.albums, s, l, letter),
-      emptyText: 'Aucun album téléchargé.',
+          OfflineLibrary.page(lib.genres, s, l, letter),
+      emptyText: lib.tracks.isEmpty
+          ? 'Aucun genre téléchargé.'
+          : 'Aucun genre téléchargé. Les genres des chansons déjà '
+                'téléchargées sont récupérés à la prochaine connexion au '
+                'serveur.',
       itemBuilder: (context, items, i) {
-        final a = items[i];
-        return AlbumCard(
-          album: a,
-          coverId: lib.coverOfAlbum(a.id),
+        final g = items[i];
+        final tracks = lib.tracksOfGenre(g.name);
+        return GenreTile(
+          genre: g,
+          count: tracks.length,
+          countLabel: 'chanson téléchargée',
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => OfflineTracksScreen(
-                title: a.name,
-                tracks: lib.tracksOfAlbum(a.id),
-                album: true,
-              ),
+              builder: (_) =>
+                  OfflineTracksScreen(title: g.name, tracks: tracks),
             ),
           ),
         );
@@ -254,7 +311,7 @@ List<Widget> offlinePages(DownloadStore d) {
             .where((t) => OfflineLibrary.startsWith(t.name, letter))
             .toList(),
       ),
-      emptyText: 'Aucun morceau téléchargé.',
+      emptyText: 'Aucune chanson téléchargée.',
       itemBuilder: (context, items, i) => TrackTile(tracks: items, index: i),
     ),
     const _OfflinePlaylists(),

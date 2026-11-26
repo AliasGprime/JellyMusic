@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import '../api/jellyfin_client.dart';
 import '../models.dart';
 import 'download_notification.dart';
 import 'session.dart';
@@ -146,6 +147,45 @@ class DownloadStore extends ChangeNotifier {
   }
 
   bool isDownloaded(String trackId) => entries.containsKey(trackId);
+
+  bool _fillingGenres = false;
+
+  /// Morceaux téléchargés par une ancienne version : leurs genres sont
+  /// demandés au serveur (pour l'onglet Genres hors connexion).
+  Future<void> fillGenres(JellyfinClient client) async {
+    if (_fillingGenres) return;
+    final missing = [
+      for (final e in entries.values)
+        if (e.track.genres == null) e.track.id,
+    ];
+    if (missing.isEmpty) return;
+    _fillingGenres = true;
+    var changed = false;
+    try {
+      for (var i = 0; i < missing.length; i += 100) {
+        final batch = missing.sublist(i, (i + 100).clamp(0, missing.length));
+        for (final t in await client.itemsByIds(batch)) {
+          final e = entries[t.id];
+          if (e == null || t.genres == null) continue;
+          entries[t.id] = DownloadEntry(
+            track: e.track.withGenres(t.genres!),
+            file: e.file,
+            bytes: e.bytes,
+            kbps: e.kbps,
+          );
+          changed = true;
+        }
+      }
+    } catch (e) {
+      debugPrint('Genres des téléchargements : $e');
+    } finally {
+      _fillingGenres = false;
+    }
+    if (!changed) return;
+    revision++;
+    await _save();
+    notifyListeners();
+  }
 
   /// Combien des morceaux [ids] (ex. ceux d'une playlist) sont sur le
   /// téléphone : aucun, une partie ou tous.

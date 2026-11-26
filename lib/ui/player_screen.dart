@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
@@ -447,8 +448,12 @@ void showSourceSheet(BuildContext context) {
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
             child: Text(
-              'Ne change que ce morceau. Les suivants gardent la version '
-              'téléchargée en priorité, sinon la qualité des Paramètres.',
+              kIsWeb
+                  ? 'Ne change que ce morceau. Les suivants gardent la '
+                        'qualité des Paramètres.'
+                  : 'Ne change que ce morceau. Les suivants gardent la '
+                        'version téléchargée en priorité, sinon la qualité '
+                        'des Paramètres.',
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),

@@ -23,6 +23,7 @@ Future<void> showDownloadDialog(
   BuildContext context, {
   required List<JItem> tracks,
   JItem? playlist,
+  String? title,
 }) async {
   final store = context.read<DownloadStore>();
   final messenger = ScaffoldMessenger.of(context);
@@ -35,11 +36,13 @@ Future<void> showDownloadDialog(
     context: context,
     builder: (_) => _QualityDialog(
       tracks: tracks,
-      title: playlist != null
-          ? 'Télécharger « ${playlist.displayName} »'
-          : tracks.length == 1
-          ? 'Télécharger « ${tracks.first.name} »'
-          : 'Télécharger ${tracks.length} morceaux',
+      title:
+          title ??
+          (playlist != null
+              ? 'Télécharger « ${playlist.displayName} »'
+              : tracks.length == 1
+              ? 'Télécharger « ${tracks.first.name} »'
+              : 'Télécharger ${tracks.length} morceaux'),
       initial: last == 0 ? null : last,
     ),
   );

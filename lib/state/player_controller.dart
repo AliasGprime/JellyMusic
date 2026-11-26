@@ -257,6 +257,12 @@ class PlayerController extends ChangeNotifier {
   /// passe au prochain morceau téléchargé de la file, ou s'arrête.
   Future<void> _skipUnavailable() async {
     if (!session.offline || _skipping) return;
+    _skipping = true;
+    try {
+      await _useDownloads();
+    } finally {
+      _skipping = false;
+    }
     final seq = player.sequence;
     final idx = player.currentIndex;
     if (seq.isEmpty || idx == null || idx >= seq.length) return;
@@ -297,6 +303,40 @@ class PlayerController extends ChangeNotifier {
     } finally {
       _skipping = false;
     }
+  }
+
+  /// Morceaux téléchargés après leur mise dans la file (encore lus par
+  /// Internet) : remplacés sur place par le fichier du téléphone, au même
+  /// endroit de la file et, pour le morceau en cours, à la même position.
+  Future<void> _useDownloads() async {
+    final d = downloads;
+    if (d == null) return;
+    final seq = player.sequence;
+    final swap = <int, JItem>{
+      for (var i = 0; i < seq.length; i++)
+        if (!_isLocal(seq[i]))
+          if (_itemForSource(seq[i]) case final t? when d.isDownloaded(t.id))
+            i: t,
+    };
+    if (swap.isEmpty) return;
+    final cur = player.currentIndex;
+    final pos = player.position;
+    final wasPlaying = player.playing;
+    if (swap.containsKey(cur)) {
+      _endCrossfade();
+      if (wasPlaying) await player.pause();
+    }
+    for (final MapEntry(key: i, value: t) in swap.entries) {
+      final orderPos = player.effectiveIndices.indexOf(i);
+      await player.removeAudioSourceAt(i);
+      _order?.insertAtPosition = orderPos < 0 ? null : orderPos;
+      await player.insertAudioSource(i, _sourceFor(t));
+    }
+    if (cur != null && swap.containsKey(cur)) {
+      await player.seek(pos, index: cur);
+      if (wasPlaying) player.play();
+    }
+    notifyListeners();
   }
 
   /// Remplace la file et lance la lecture.

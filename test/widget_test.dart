@@ -158,4 +158,31 @@ void main() {
     expect(OfflineLibrary.startsWith('abba', 'A'), isTrue);
     expect(OfflineLibrary.startsWith('Zaz', null), isTrue);
   });
+
+  test('genres des morceaux téléchargés', () {
+    final t = JItem.fromJson({
+      'Id': 'a',
+      'Name': 'A',
+      'Type': 'Audio',
+      'Genres': ['Rock', 'Pop'],
+    });
+    expect(t.genres, ['Rock', 'Pop']);
+    expect(JItem.fromJson(t.toJson()).genres, ['Rock', 'Pop']);
+    final old = JItem(id: 'b', name: 'B', type: 'Audio');
+    expect(old.genres, isNull);
+    expect(old.withGenres(['rock']).genres, ['rock']);
+    expect(old.withGenres(['rock']).name, 'B');
+
+    final d = DownloadStore(Session());
+    for (final x in [t, old.withGenres(['rock']), old]) {
+      d.entries[x.id + (x.genres == null ? '0' : '')] = DownloadEntry(
+        track: x,
+        file: '/x',
+        bytes: 1,
+      );
+    }
+    final lib = OfflineLibrary(d);
+    expect(lib.genres.map((g) => g.name), ['Pop', 'Rock']);
+    expect(lib.tracksOfGenre('ROCK').length, 2);
+  });
 }

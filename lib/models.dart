@@ -28,6 +28,9 @@ class JItem {
   /// morceaux sonnent au même niveau ; null si pas encore mesuré.
   final double? normalizationGain;
 
+  /// Genres du morceau ; null si inconnus (morceau téléchargé par une ancienne version).
+  final List<String>? genres;
+
   const JItem({
     required this.id,
     required this.name,
@@ -48,6 +51,7 @@ class JItem {
     this.musicCount,
     this.musicIds,
     this.normalizationGain,
+    this.genres,
   });
 
   factory JItem.fromJson(Map<String, dynamic> j) {
@@ -71,6 +75,7 @@ class JItem {
       childCount: (j['ChildCount'] ?? j['SongCount']) as int?,
       playlistItemId: j['PlaylistItemId'] as String?,
       normalizationGain: (j['NormalizationGain'] as num?)?.toDouble(),
+      genres: (j['Genres'] as List?)?.cast<String>(),
       mediaType: switch (j['MediaType']) {
         final String m when m != 'Unknown' => m,
         _ => null,
@@ -97,6 +102,7 @@ class JItem {
     'ChildCount': ?childCount,
     'MediaType': ?mediaType,
     'NormalizationGain': ?normalizationGain,
+    'Genres': ?genres,
   };
 
   JItem withMusic(List<String> ids) => JItem(
@@ -119,7 +125,15 @@ class JItem {
     musicCount: ids.length,
     musicIds: ids,
     normalizationGain: normalizationGain,
+    genres: genres,
   );
+
+  /// Copie avec les genres (morceaux téléchargés par une ancienne version).
+  JItem withGenres(List<String> g) => JItem.fromJson({
+    ...toJson(),
+    'PlaylistItemId': ?playlistItemId,
+    'Genres': g,
+  });
 
   /// Artiste(s) à afficher sous le titre.
   String get artistLine =>

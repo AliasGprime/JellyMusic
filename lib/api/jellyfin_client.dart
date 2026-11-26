@@ -74,13 +74,12 @@ class JellyfinClient {
   }
 
   Future<dynamic> _get(String path, [Map<String, String>? query]) async {
-    // Listes d'éléments : demander aussi la correction de volume (dB).
+    // Listes d'éléments : demander aussi la correction de volume (dB) et
+    // les genres (gardés avec les morceaux téléchargés).
     if (query != null && path.endsWith('/Items')) {
       final f = query['Fields'];
-      query = {
-        ...query,
-        'Fields': f == null ? 'NormalizationGain' : '$f,NormalizationGain',
-      };
+      const extra = 'NormalizationGain,Genres';
+      query = {...query, 'Fields': f == null ? extra : '$f,$extra'};
     }
     final http.Response res;
     try {
@@ -317,6 +316,64 @@ class JellyfinClient {
           throw e;
         });
   }
+
+  /// Genres de musique de la bibliothèque, avec leur nombre de chansons.
+  Future<ItemsPage> genres({int start = 0, int? limit, String? letter}) async =>
+      _page(
+        await _get('/MusicGenres', {
+          'userId': userId!,
+          'SortBy': 'SortName',
+          'SortOrder': 'Ascending',
+          'Fields': 'ItemCounts',
+          'EnableImageTypes': 'Primary',
+          ..._letterFilter(letter),
+          ..._paging(start, limit),
+        }),
+      );
+
+  /// Chansons d'un genre, par titre (ou au hasard).
+  Future<ItemsPage> genreSongs(
+    String genreId, {
+    int start = 0,
+    int? limit,
+    bool random = false,
+  }) async => _page(
+    await _get('/Items', {
+      'userId': userId!,
+      'IncludeItemTypes': 'Audio',
+      'Recursive': 'true',
+      'GenreIds': genreId,
+      'SortBy': random ? 'Random' : 'Name',
+      'SortOrder': 'Ascending',
+      ..._paging(start, limit),
+    }),
+  );
+
+  /// Albums d'un genre, par titre.
+  Future<ItemsPage> genreAlbums(
+    String genreId, {
+    int start = 0,
+    int? limit,
+  }) async => _page(
+    await _get('/Items', {
+      'userId': userId!,
+      'IncludeItemTypes': 'MusicAlbum',
+      'Recursive': 'true',
+      'GenreIds': genreId,
+      'SortBy': 'SortName',
+      'SortOrder': 'Ascending',
+      'Fields': 'ChildCount',
+      ..._paging(start, limit),
+    }),
+  );
+
+  /// Éléments par identifiants (ex. : genres des morceaux téléchargés).
+  Future<List<JItem>> itemsByIds(List<String> ids) async =>
+      _page(await _get('/Items', {'userId': userId!, 'Ids': ids.join(',')}))
+          .items;
+
+  /// Toutes les chansons de la bibliothèque, par titre.
+  Future<List<JItem>> allSongs() => _songsSnapshot();
 
   /// Sélection aléatoire de morceaux dans toute la bibliothèque.
   Future<List<JItem>> randomSongs({int limit = 200}) async => _page(

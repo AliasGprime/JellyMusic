@@ -9,6 +9,7 @@ import '../state/session.dart';
 import 'artist_screen.dart';
 import 'downloads.dart';
 import 'layout.dart';
+import 'library_tabs.dart';
 import 'mini_player.dart';
 import 'offline_library.dart';
 import 'player_bar.dart';
@@ -27,13 +28,36 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
-  static const _titles = ['Artistes', 'Albums', 'Morceaux', 'Playlists'];
+  static const _titles = ['Bibliothèque', 'Genres', 'Chansons', 'Playlists'];
   static const _icons = [
-    Icons.person,
-    Icons.album,
+    Icons.library_music,
+    Icons.category,
     Icons.music_note,
     Icons.queue_music,
   ];
+
+  late final Session _session = context.read<Session>();
+
+  @override
+  void initState() {
+    super.initState();
+    _session.addListener(_fillGenres);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fillGenres());
+  }
+
+  @override
+  void dispose() {
+    _session.removeListener(_fillGenres);
+    super.dispose();
+  }
+
+  /// Serveur disponible : genres des morceaux téléchargés par une ancienne
+  /// version (pour l'onglet Genres hors connexion).
+  void _fillGenres() {
+    final c = _session.client;
+    if (!mounted || c == null || _session.offline) return;
+    context.read<DownloadStore>().fillGenres(c);
+  }
 
   /// Mise en page « ordinateur » : un navigateur par onglet, pour que les
   /// pages (album, artiste…) s'ouvrent dans la zone centrale.
@@ -87,13 +111,21 @@ class _HomeScreenState extends State<HomeScreen> {
             .push(MaterialPageRoute(builder: (_) => const DownloadsScreen()));
       }
       if (v == 'shuffle') _shuffleAll();
+      if (v == 'downloadAll') _downloadAll();
       if (v == 'update') checkForUpdates(context, manual: true);
       if (v == 'logout') _logout();
     },
     itemBuilder: (_) {
-      final online = context.read<Session>().serverAvailable;
+      final session = context.read<Session>();
+      final online = session.serverAvailable;
       return [
         const PopupMenuItem(value: 'shuffle', child: Text('Tout en aléatoire')),
+        // Onglet Chansons : télécharger toute la bibliothèque.
+        if (!kIsWeb && _tab == 2 && online && !session.offline)
+          const PopupMenuItem(
+            value: 'downloadAll',
+            child: Text('Télécharger toutes les chansons'),
+          ),
         if (!kIsWeb)
           const PopupMenuItem(
             value: 'downloads',
@@ -127,6 +159,28 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  /// Télécharge toutes les chansons du serveur (qualité demandée).
+  Future<void> _downloadAll() async {
+    final client = context.read<Session>().client!;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(
+      const SnackBar(content: Text('Liste des chansons du serveur…')),
+    );
+    try {
+      final all = await client.allSongs();
+      messenger.hideCurrentSnackBar();
+      if (!mounted || all.isEmpty) return;
+      await showDownloadDialog(
+        context,
+        tracks: all,
+        title: 'Télécharger toutes les chansons (${all.length})',
+      );
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
   Future<void> _logout() async {
     final store = context.read<PlaylistStore>();
     await context.read<PlayerController>().stop();
@@ -134,41 +188,48 @@ class _HomeScreenState extends State<HomeScreen> {
     if (mounted) await context.read<Session>().logout();
   }
 
-  /// Nombre maximum de morceaux mis dans la file par « Lire » / « Aléatoire »
-  /// de la page Morceaux.
+  /// Nombre maximum de chansons mises dans la file par « Lire » /
+  /// « Aléatoire » de l'onglet Chansons.
   static const _maxQueue = 1000;
 
   List<Widget> _buildPages() {
     final client = context.read<Session>().client!;
     return <Widget>[
-      PagedItems(
-        alphabet: true,
-        fetch: (s, l, letter) =>
-            client.artists(start: s, limit: l, letter: letter),
-        emptyText: 'Aucun artiste.',
-        itemBuilder: (context, items, i) {
-          final a = items[i];
-          return ListTile(
-            leading: CoverImage(
-              itemId: a.imageItemId,
-              radius: 24,
-              fallback: Icons.person,
-            ),
-            title: Text(a.name),
-            onTap: () => Navigator.of(
-              context,
-            ).push(MaterialPageRoute(builder: (_) => ArtistScreen(artist: a))),
-          );
-        },
+      SegmentedPages(
+        labels: const ['Artistes', 'Albums'],
+        icons: const [Icons.person, Icons.album],
+        children: [
+          PagedItems(
+            alphabet: true,
+            fetch: (s, l, letter) =>
+                client.artists(start: s, limit: l, letter: letter),
+            emptyText: 'Aucun artiste.',
+            itemBuilder: (context, items, i) {
+              final a = items[i];
+              return ListTile(
+                leading: CoverImage(
+                  itemId: a.imageItemId,
+                  radius: 24,
+                  fallback: Icons.person,
+                ),
+                title: Text(a.name),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => ArtistScreen(artist: a)),
+                ),
+              );
+            },
+          ),
+          PagedItems(
+            grid: true,
+            alphabet: true,
+            fetch: (s, l, letter) =>
+                client.albums(start: s, limit: l, letter: letter),
+            emptyText: 'Aucun album.',
+            itemBuilder: (context, items, i) => AlbumCard(album: items[i]),
+          ),
+        ],
       ),
-      PagedItems(
-        grid: true,
-        alphabet: true,
-        fetch: (s, l, letter) =>
-            client.albums(start: s, limit: l, letter: letter),
-        emptyText: 'Aucun album.',
-        itemBuilder: (context, items, i) => AlbumCard(album: items[i]),
-      ),
+      const GenresPage(),
       PagedItems(
         alphabet: true,
         fetch: (s, l, letter) =>
@@ -185,7 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
             random: true,
           )).items,
         ),
-        emptyText: 'Aucun morceau.',
+        emptyText: 'Aucune chanson.',
         itemBuilder: (context, items, i) => TrackTile(tracks: items, index: i),
       ),
       const PlaylistsTab(),
@@ -229,20 +290,9 @@ class _HomeScreenState extends State<HomeScreen> {
           NavigationBar(
             selectedIndex: _tab,
             onDestinationSelected: (i) => setState(() => _tab = i),
-            destinations: const [
-              NavigationDestination(
-                icon: Icon(Icons.person),
-                label: 'Artistes',
-              ),
-              NavigationDestination(icon: Icon(Icons.album), label: 'Albums'),
-              NavigationDestination(
-                icon: Icon(Icons.music_note),
-                label: 'Morceaux',
-              ),
-              NavigationDestination(
-                icon: Icon(Icons.queue_music),
-                label: 'Playlists',
-              ),
+            destinations: [
+              for (var i = 0; i < 4; i++)
+                NavigationDestination(icon: Icon(_icons[i]), label: _titles[i]),
             ],
           ),
         ],

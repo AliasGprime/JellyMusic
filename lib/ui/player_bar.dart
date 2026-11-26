@@ -92,9 +92,14 @@ class PlayerBar extends StatelessWidget {
             ),
             // Actions et volume.
             SizedBox(
-              width: 300,
+              width: 340,
               child: Row(
                 children: [
+                  IconButton(
+                    tooltip: 'Qualité : ${pc.currentSourceLabel}',
+                    icon: const Icon(Icons.high_quality_outlined),
+                    onPressed: () => showSourceSheet(context),
+                  ),
                   IconButton(
                     tooltip: 'Ajouter à une playlist',
                     icon: const Icon(Icons.playlist_add),

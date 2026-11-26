@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icônes de la notification de lecture (audio_service) : appelées par leur
+     nom, la réduction des ressources de la version publiée les supprimait.
+     Sans elles, le service de lecture ne passait pas au premier plan et
+     Android coupait le réseau quelques minutes après la mise en veille. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/audio_service_*" />

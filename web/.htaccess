@@ -1,10 +1,9 @@
-# JellyMusic : le navigateur revérifie la page et le code à chaque visite
+# JellyMusic : le navigateur revérifie chaque fichier à chaque visite
 # (requête légère si rien n'a changé). Après une mise à jour, tout le monde
-# reçoit donc la nouvelle version sans avoir à faire Ctrl+F5.
+# reçoit donc la nouvelle version sans avoir à faire Ctrl+F5 — y compris la
+# police d'icônes, qui garde le même nom mais change d'une version à l'autre.
 <IfModule mod_headers.c>
-  <FilesMatch "\.(html|js|json|txt)$">
-    Header set Cache-Control "no-cache"
-  </FilesMatch>
+  Header set Cache-Control "no-cache"
 </IfModule>
 
 AddType application/wasm .wasm

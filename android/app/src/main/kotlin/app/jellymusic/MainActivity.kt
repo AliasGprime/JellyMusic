@@ -12,6 +12,27 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : AudioServiceActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // Application glissée hors des applications récentes : le code Dart
+        // arrête la lecture (et prévient Jellyfin), puis l'application se
+        // ferme vraiment. Sans réponse du code Dart, fermeture après 3 s.
+        val app = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "app.jellymusic/app")
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val exit = Runnable { android.os.Process.killProcess(android.os.Process.myPid()) }
+        TaskRemovedHook.onRemoved = {
+            main.post { app.invokeMethod("taskRemoved", null) }
+            main.postDelayed(exit, 3000)
+        }
+        app.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "hookTaskRemoved" -> result.success(TaskRemovedHook.install())
+                "exit" -> {
+                    result.success(null)
+                    main.removeCallbacks(exit)
+                    main.postDelayed(exit, 200)
+                }
+                else -> result.notImplemented()
+            }
+        }
         val channel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "app.jellymusic/downloads",

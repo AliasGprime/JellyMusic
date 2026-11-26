@@ -72,4 +72,7 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
     // Notification de progression des téléchargements.
     implementation("androidx.core:core-ktx:1.13.1")
+    // Fermeture de l'application glissée hors des récentes (TaskRemovedHook) :
+    // même version que audio_service.
+    implementation("androidx.media:media:1.7.0")
 }

@@ -12,6 +12,7 @@ import '../api/jellyfin_client.dart';
 import '../audio/android_eq.dart';
 import '../audio/eq_bridge.dart';
 import '../models.dart';
+import 'app_exit.dart';
 import 'download_store.dart';
 import 'session.dart';
 
@@ -56,6 +57,13 @@ class PlayerController extends ChangeNotifier {
   JellyfinClient? get _reporter => session.offline ? null : session.client;
 
   Future<void> _init() async {
+    // Android : application glissée hors des applications récentes →
+    // lecture arrêtée (Jellyfin prévenu), téléchargements annulés, puis
+    // fermeture.
+    AppExit.onTaskRemoved(() async {
+      downloads?.cancel();
+      await stop();
+    });
     final audioSession = await AudioSession.instance;
     await audioSession.configure(const AudioSessionConfiguration.music());
 

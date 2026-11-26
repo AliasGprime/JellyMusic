@@ -514,41 +514,6 @@ class JellyfinClient {
   Future<void> deletePlaylist(String playlistId) =>
       _send('DELETE', '/Items/$playlistId');
 
-  // ---- Réglages de l'application, propres à chaque compte ----
-  // Rangés dans les « préférences d'affichage » de l'utilisateur sur le
-  // serveur Jellyfin (champ CustomPrefs), sous l'identifiant « jellymusic ».
-
-  static const _prefsId = 'jellymusic';
-
-  Map<String, String> get _prefsQuery => {
-    'userId': userId!,
-    'client': clientName,
-  };
-
-  Future<Map<String, dynamic>> _displayPrefs() async =>
-      (await _get('/DisplayPreferences/$_prefsId', _prefsQuery))
-          as Map<String, dynamic>;
-
-  Future<String?> getUserSetting(String key) async {
-    final custom = (await _displayPrefs())['CustomPrefs'];
-    return custom is Map ? custom[key] as String? : null;
-  }
-
-  Future<void> setUserSetting(String key, String value) async {
-    final prefs = await _displayPrefs();
-    final custom = Map<String, dynamic>.from(
-      (prefs['CustomPrefs'] as Map?) ?? const {},
-    );
-    custom[key] = value;
-    prefs['CustomPrefs'] = custom;
-    await _send(
-      'POST',
-      '/DisplayPreferences/$_prefsId',
-      query: _prefsQuery,
-      body: prefs,
-    );
-  }
-
   Future<List<JItem>> search(String term) async => _page(
     await _get('/Items', {
       'userId': userId!,

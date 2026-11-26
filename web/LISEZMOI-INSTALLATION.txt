@@ -34,5 +34,5 @@ Remplacez tous les fichiers par ceux de la nouvelle version (votre
 serveur.txt n'en fait pas partie et reste en place).
 
 ÉGALISEUR
-Menu ⋮ > Paramètres. Les réglages sont enregistrés sur le compte Jellyfin
-de chaque utilisateur : chacun garde les siens, sur tous ses navigateurs.
+Menu ⋮ > Paramètres. Les réglages sont enregistrés dans le navigateur
+où ils sont faits, séparément pour chaque compte.

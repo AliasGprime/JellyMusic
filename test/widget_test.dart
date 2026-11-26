@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jellymusic/audio/android_eq.dart';
 import 'package:jellymusic/api/jellyfin_client.dart';
 import 'package:jellymusic/models.dart';
 import 'package:jellymusic/state/download_store.dart';
@@ -174,7 +175,11 @@ void main() {
     expect(old.withGenres(['rock']).name, 'B');
 
     final d = DownloadStore(Session());
-    for (final x in [t, old.withGenres(['rock']), old]) {
+    for (final x in [
+      t,
+      old.withGenres(['rock']),
+      old,
+    ]) {
       d.entries[x.id + (x.genres == null ? '0' : '')] = DownloadEntry(
         track: x,
         file: '/x',
@@ -184,5 +189,17 @@ void main() {
     final lib = OfflineLibrary(d);
     expect(lib.genres.map((g) => g.name), ['Pop', 'Rock']);
     expect(lib.tracksOfGenre('ROCK').length, 2);
+  });
+
+  test('égaliseur Android : 10 bandes vers les bandes du téléphone', () {
+    final g = <double>[6, 5, 4, 2, 0, 0, 0, 0, 0, 0];
+    expect(curveAt(31, g), closeTo(6, 0.01));
+    expect(curveAt(10, g), 6); // sous la première bande
+    expect(curveAt(20000, g), 0); // au-dessus de la dernière
+    expect(curveAt(62, g), closeTo(5, 0.1));
+    // Entre 62 et 125 Hz (milieu en octaves ≈ 88 Hz) : entre 5 et 4.
+    expect(curveAt(88, g), closeTo(4.5, 0.1));
+    // Fréquence en millihertz (certains téléphones).
+    expect(curveAt(62000, g), closeTo(5, 0.1)); // 62 Hz en millihertz
   });
 }

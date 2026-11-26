@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:provider/provider.dart';
 
+import '../audio/android_eq.dart';
 import '../state/equalizer_store.dart';
 import '../state/player_controller.dart';
 import '../state/session.dart';
@@ -435,13 +436,20 @@ class EqualizerPanel extends StatelessWidget {
 
     final s = eq.settings;
     final presetNames = [...eqPresets.keys, eqCustom];
-    final storageText = eq.saving
-        ? 'Enregistrement…'
-        : eq.storage == EqStorage.account
-        ? 'Réglages enregistrés sur votre compte Jellyfin : vous les '
-              'retrouvez sur tous vos navigateurs.'
-        : 'Le serveur n\'a pas accepté l\'enregistrement : réglages gardés '
-              'dans ce navigateur seulement (toujours séparés par compte).';
+    final storageText = kIsWeb
+        ? 'Réglages enregistrés dans ce navigateur : chaque appareil garde '
+              'les siens.'
+        : 'Réglages enregistrés sur ce téléphone : chaque appareil garde '
+              'les siens.';
+    // Android : l'égaliseur du téléphone a ses propres bandes.
+    final bands = kIsWeb ? null : androidEqBands.value;
+    final phoneText = kIsWeb
+        ? ''
+        : bands == null
+        ? '\nSur Android, l\'égaliseur du téléphone s\'applique dès qu\'un '
+              'morceau est lancé.'
+        : '\nL\'égaliseur de ce téléphone a $bands bandes : les 10 réglages '
+              'ci-dessus sont adaptés à ces bandes.';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -532,7 +540,7 @@ class EqualizerPanel extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 0),
           child: Text(
             'Astuce : si le son sature quand vous montez des bandes, baissez '
-            'la pré-amplification.\n$storageText',
+            'la pré-amplification.\n$storageText$phoneText',
             style: theme.textTheme.bodySmall,
           ),
         ),

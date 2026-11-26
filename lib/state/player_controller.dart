@@ -9,6 +9,7 @@ import 'package:just_audio_background/just_audio_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/jellyfin_client.dart';
+import '../audio/android_eq.dart';
 import '../audio/eq_bridge.dart';
 import '../models.dart';
 import 'download_store.dart';
@@ -18,6 +19,8 @@ import 'session.dart';
 class PlayerController extends ChangeNotifier {
   final Session session;
   final AudioPlayer player = AudioPlayer(
+    // Android : égaliseur du téléphone (réglages de l'égaliseur JellyMusic).
+    audioPipeline: AudioPipeline(androidAudioEffects: [?androidEqualizer]),
     // Android : garder en mémoire la partie déjà écoutée (par défaut, rien
     // n'est gardé : reculer obligeait à tout retélécharger, et Jellyfin à
     // reconvertir), charger plus loin devant, et repartir plus vite après

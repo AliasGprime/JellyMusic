@@ -94,21 +94,13 @@ class EqSettings {
   }
 }
 
-/// Où les réglages sont enregistrés.
-enum EqStorage { account, browser }
-
-/// Réglages de l'égaliseur du compte connecté. Ils sont enregistrés sur le
-/// serveur Jellyfin (préférences de l'utilisateur), donc propres à chaque
-/// compte et retrouvés sur n'importe quel navigateur. Si le serveur refuse,
-/// repli : stockage dans ce navigateur, toujours séparé par compte.
+/// Réglages de l'égaliseur, enregistrés sur l'appareil où ils sont faits
+/// (téléphone ou navigateur) : chaque appareil a les siens. Ils restent
+/// séparés par compte.
 class EqualizerStore extends ChangeNotifier {
-  static const _prefKey = 'equalizer';
-
   final Session session;
   EqSettings settings = EqSettings.flat;
-  EqStorage storage = EqStorage.account;
   bool loading = false;
-  bool saving = false;
   String? _loadedFor;
   Timer? _saveTimer;
 
@@ -145,14 +137,7 @@ class EqualizerStore extends ChangeNotifier {
     final user = session.client!.userId;
     loading = true;
     notifyListeners();
-    String? text;
-    try {
-      text = await session.client!.getUserSetting(_prefKey);
-      storage = EqStorage.account;
-    } catch (_) {
-      storage = EqStorage.browser;
-      text = (await SharedPreferences.getInstance()).getString(_localKey);
-    }
+    final text = (await SharedPreferences.getInstance()).getString(_localKey);
     // Le compte a changé pendant le chargement : ces réglages ne sont plus
     // les bons (le nouveau compte a lancé son propre chargement).
     if (session.client?.userId != user) return;
@@ -204,19 +189,7 @@ class EqualizerStore extends ChangeNotifier {
   Future<void> _save() async {
     if (!session.isLoggedIn) return;
     final text = jsonEncode(settings.toJson());
-    saving = true;
-    notifyListeners();
-    try {
-      if (storage == EqStorage.account) {
-        await session.client!.setUserSetting(_prefKey, text);
-      }
-    } catch (_) {
-      storage = EqStorage.browser;
-    }
-    // Copie locale : sert de repli si le serveur ne répond pas.
     await (await SharedPreferences.getInstance()).setString(_localKey, text);
-    saving = false;
-    notifyListeners();
   }
 
   @override

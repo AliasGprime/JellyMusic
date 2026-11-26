@@ -399,7 +399,7 @@ class CrossfadePanel extends StatelessWidget {
           child: Text(
             'Pas de fondu quand vous changez de morceau vous-même, en '
             'répétition d\'un seul morceau ou pendant une boucle A-B. '
-            'Réglage gardé dans ce navigateur.',
+            '${kIsWeb ? 'Réglage gardé dans ce navigateur.' : 'Réglage gardé sur ce téléphone.'}',
             style: theme.textTheme.bodySmall,
           ),
         ),

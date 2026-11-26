@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:just_audio_platform_interface/just_audio_platform_interface.dart';
 import 'package:provider/provider.dart';
 
+import 'audio/player_router.dart';
 import 'state/download_store.dart';
 import 'state/equalizer_store.dart';
 import 'state/player_controller.dart';
@@ -18,11 +20,17 @@ import 'update/update_dialog.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+    final native = JustAudioPlatform.instance;
     // Lecture en arrière-plan, notification et contrôles sur l'écran verrouillé.
     await JustAudioBackground.init(
       androidNotificationChannelId: 'app.jellymusic.audio',
       androidNotificationChannelName: 'Lecture de musique',
       androidNotificationOngoing: true,
+    );
+    // Second lecteur du fondu enchaîné : directement au moteur natif.
+    JustAudioPlatform.instance = PlayerRouter(
+      background: JustAudioPlatform.instance,
+      native: native,
     );
   }
   final session = Session();

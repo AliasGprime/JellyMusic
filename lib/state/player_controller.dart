@@ -997,8 +997,10 @@ class PlayerController extends ChangeNotifier {
   /// Durée du fondu enchaîné en secondes (0 : désactivé).
   int crossfadeSeconds = 0;
 
-  /// Nécessite deux lecteurs simultanés : version web seulement.
-  bool get crossfadeSupported => kIsWeb;
+  /// Nécessite deux lecteurs simultanés : version web, et Android (le
+  /// second lecteur passe par l'aiguillage de audio/player_router.dart).
+  bool get crossfadeSupported =>
+      kIsWeb || defaultTargetPlatform == TargetPlatform.android;
 
   AudioPlayer? _tail;
   bool _tailReady = false;
@@ -1069,14 +1071,33 @@ class PlayerController extends ChangeNotifier {
     if (c == null || idx >= seq.length) return;
     final tag = seq[idx].tag;
     if (tag is! MediaItem) return;
-    final tail = AudioPlayer();
+    final item = _items[tag.id];
+    if (!kIsWeb && item == null) return;
+    // Android : le second lecteur n'a pas de réglage de mémoire tampon (c'est
+    // ce qui l'envoie au moteur natif, voir PlayerRouter), ne gère pas la
+    // session audio (le lecteur principal s'en charge) et a son propre
+    // égaliseur, réglé comme celui du lecteur principal.
+    final tailEq = kIsWeb ? null : secondaryEqualizer();
+    final tail = kIsWeb
+        ? AudioPlayer()
+        : AudioPlayer(
+            handleInterruptions: false,
+            handleAudioSessionActivation: false,
+            audioPipeline: AudioPipeline(androidAudioEffects: [?tailEq]),
+          );
     _tail = tail;
     _tailIndex = idx;
     _handoffAt = at;
     _tailReady = false;
     tail
         .setAudioSource(
-          AudioSource.uri(Uri.parse(c.streamUrl(tag.id, maxKbps: streamKbps))),
+          // Android : même version que le lecteur principal (fichier
+          // téléchargé, ou flux dans la qualité en cours).
+          kIsWeb
+              ? AudioSource.uri(
+                  Uri.parse(c.streamUrl(tag.id, maxKbps: streamKbps)),
+                )
+              : _sourceFor(item!),
           initialPosition: at,
         )
         .then((_) {

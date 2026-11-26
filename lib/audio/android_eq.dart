@@ -23,12 +23,16 @@ final ValueNotifier<int?> androidEqBands = ValueNotifier(null);
 String? _latest;
 bool _running = false;
 
+/// Derniers réglages reçus (pour l'égaliseur du second lecteur du fondu).
+String? _current;
+
 /// Applique les réglages (JSON de EqSettings). Les réglages arrivent
 /// parfois avant que le lecteur soit prêt : seul le dernier est appliqué,
 /// dès que l'égaliseur du téléphone répond.
 void applyAndroidEqualizer(String json) {
   final eq = androidEqualizer;
   if (eq == null) return;
+  _current = json;
   _latest = json;
   if (!_running) _run(eq);
 }
@@ -39,25 +43,45 @@ Future<void> _run(AndroidEqualizer eq) async {
     final p = await eq.parameters;
     androidEqBands.value = p.bands.length;
     while (_latest != null) {
-      final j = jsonDecode(_latest!) as Map<String, dynamic>;
+      final json = _latest!;
       _latest = null;
-      final enabled = j['enabled'] == true;
-      final preamp = ((j['preamp'] as num?) ?? 0).toDouble();
-      final gains = [
-        for (final g in (j['gains'] as List? ?? const []))
-          (g as num).toDouble(),
-      ];
-      for (final b in p.bands) {
-        final db = enabled ? curveAt(b.centerFrequency, gains) + preamp : 0.0;
-        await b.setGain(db.clamp(p.minDecibels, p.maxDecibels).toDouble());
-      }
-      await eq.setEnabled(enabled);
+      await _set(eq, p, json);
     }
   } catch (e) {
     debugPrint('Égaliseur Android : $e');
   } finally {
     _running = false;
   }
+}
+
+Future<void> _set(
+  AndroidEqualizer eq,
+  AndroidEqualizerParameters p,
+  String json,
+) async {
+  final j = jsonDecode(json) as Map<String, dynamic>;
+  final enabled = j['enabled'] == true;
+  final preamp = ((j['preamp'] as num?) ?? 0).toDouble();
+  final gains = [
+    for (final g in (j['gains'] as List? ?? const [])) (g as num).toDouble(),
+  ];
+  for (final b in p.bands) {
+    final db = enabled ? curveAt(b.centerFrequency, gains) + preamp : 0.0;
+    await b.setGain(db.clamp(p.minDecibels, p.maxDecibels).toDouble());
+  }
+  await eq.setEnabled(enabled);
+}
+
+/// Égaliseur du second lecteur (fondu enchaîné), avec les réglages en
+/// cours : la fin du morceau qui s'éteint garde le même son.
+AndroidEqualizer? secondaryEqualizer() {
+  final json = _current;
+  if (androidEqualizer == null || json == null) return null;
+  final eq = AndroidEqualizer();
+  eq.parameters
+      .then((p) => _set(eq, p, json))
+      .catchError((Object e) => debugPrint('Égaliseur (fondu) : $e'));
+  return eq;
 }
 
 /// Gain (dB) de la courbe à 10 bandes [gains] à la fréquence [hz] :
